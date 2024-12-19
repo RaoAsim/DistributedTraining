@@ -1,0 +1,38 @@
+# PLEASE READ THIS 
+# THIS SUBNET INCENTIVIZES COMPUTE AND BANDWIDTH. THE MORE DATA YOU CAN TRAIN ON AND 
+# THE FASTER YOU CAN UPLOAD & DOWNLOAD GRADIENTS THE MORE INCENTIVE YOU'LL GAIN.
+
+# RUNPOD'S RTX A4000'S WITH 1 GBPS UPLOAD & DOWNLOAD SPEEDS PERFORM WELL.
+
+version: '1.0'
+
+compute_spec:
+
+  miner:
+
+    gpu:
+      required: True                       
+      min_vram: 48
+      recommended_gpu: "RTX A6000"  
+
+    os:
+      name: "Ubuntu" 
+      version: 20.04 
+
+  validator:
+
+    gpu:
+      required: True                       
+      min_vram: 48
+      recommended_gpu: "RTX A6000"
+
+    os:
+      name: "Ubuntu" 
+      version: 20.04 
+
+network_spec:
+  bandwidth:  # Gbps. THIS WILL ALSO IMPACT YOUR SCORE. THE QUICKER YOU DOWNLOAD & UPLOAD THE BETTER.
+    min_download : 15
+    recommended_download: 20
+    min_upload: 15
+    recommended_upload: 20
