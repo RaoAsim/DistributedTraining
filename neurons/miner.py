@@ -21,7 +21,7 @@ import os
 import random
 import time
 import typing
-
+import httpx
 os.environ["NEST_ASYNCIO"] = "0"
 import copy
 
