@@ -426,6 +426,7 @@ class Miner(BaseMinerNeuron):
         return synapse
 
     async def delete_old_epoch(self, global_epoch: int):
+        bt.logging.info("deletion started")
         url = f'http://0.0.0.0:8000/delete_cache/{global_epoch}'  # Replace with the correct URL
         async with httpx.AsyncClient() as client:
             try:
@@ -499,7 +500,7 @@ class Miner(BaseMinerNeuron):
         )
 
         above_function=time.perf_counter()-start_time
-        bt.logging.info(f" time in above function:{above_function}")
+        bt.logging.info(f" time in above function:{above_function} and gpu:{self.device}")
         synapse.batch_size = self.config.neuron.local_batch_size_train
         total_loss = 0
         gradient_sum_list = []
