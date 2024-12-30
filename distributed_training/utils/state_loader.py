@@ -78,6 +78,10 @@ def load_model_optimizer_gradient_averager(self, epoch):
         )
     )
     # Move the model to the appropriate device
+    if torch.cuda.device_count() > 1:
+        bt.logging.info(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
+        self.model = torch.nn.DataParallel(self.model)
+        
     self.model = self.model.to(self.device)
 
     # Delete any historic model references in GlobalOptimManager
