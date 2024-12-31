@@ -516,7 +516,11 @@ class Miner(BaseMinerNeuron):
             # Forward pass
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 outputs = self.model(input_ids=inputs, labels=labels)
-                loss = outputs[1] 
+                if torch.cuda.device_count() > 1:
+                    loss = outputs[1].mean()
+                else:
+                    loss = outputs[1]
+                    
             total_loss += loss.detach().item()
 
             
