@@ -57,6 +57,7 @@ def load_model_optimizer_gradient_averager(self, epoch):
     )
     # Delete existing model
     if hasattr(self, "model"):
+        model = self.model.module if isinstance(self.model, torch.nn.DataParallel) else self.model
         del self.model.model.transformer.wte.weight
         del self.model.model.transformer.wte.norm
         del self.model.model.transformer.wpe.weight
