@@ -274,7 +274,10 @@ def load_state_from_peer(self, epoch=None, keep_recent=3):
 
 def cleanup_old_cache(self, keep_recent):
     """Helper method to clean up old cache files"""
-    current_revision = self.model.config._commit_hash
+    model_config = (
+        self.model.module.config if hasattr(self.model, "module") else self.model.config
+    )
+    current_revision = model_config._commit_hash
     cache_info = scan_cache_dir()
     for repo in cache_info.repos:
         if repo.repo_id == self.config.neuron.model_name:
