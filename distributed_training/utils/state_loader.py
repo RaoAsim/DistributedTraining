@@ -61,12 +61,14 @@ def load_model_optimizer_gradient_averager(self, epoch):
         # Handle deletion and cleanup for multi-GPU systems
         if hasattr(self, "model"):
             model = self.model.module if isinstance(self.model, torch.nn.DataParallel) else self.model
-            del model.transformer.wte.weight
-            del model.transformer.wte.norm
-            del model.transformer.wpe.weight
-            del model.transformer.wpe.norm
-            del model.transformer.wte
-            del model.transformer.wpe
+            if hasattr(model, "transformer"):
+                del model.transformer.wte.weight
+                del model.transformer.wte.norm
+                del model.transformer.wpe.weight
+                del model.transformer.wpe.norm
+                del model.transformer.wte
+                del model.transformer.wpe
+
             del self.model
             gc.collect()
             torch.cuda.empty_cache()
