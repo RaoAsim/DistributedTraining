@@ -56,17 +56,31 @@ def load_model_optimizer_gradient_averager(self, epoch):
         f"CPU Memory Before Loading State {psutil.virtual_memory().available / 10**9} GB"
     )
     # Delete existing model
-    if hasattr(self, "model"):
-        model = self.model.module if isinstance(self.model, torch.nn.DataParallel) else self.model
-        del self.model.model.transformer.wte.weight
-        del self.model.model.transformer.wte.norm
-        del self.model.model.transformer.wpe.weight
-        del self.model.model.transformer.wpe.norm
-        del self.model.model.transformer.wte
-        del self.model.model.transformer.wpe
-        del self.model
-        gc.collect()
-        torch.cuda.empty_cache()
+    if torch.cuda.device_count() > 1:
+        bt.logging.info(f"System has {torch.cuda.device_count()} GPUs, using DataParallel logic.")
+        # Handle deletion and cleanup for multi-GPU systems
+        if hasattr(self, "model"):
+            model = self.model.module if isinstance(self.model, torch.nn.DataParallel) else self.model
+            del model.transformer.wte.weight
+            del model.transformer.wte.norm
+            del model.transformer.wpe.weight
+            del model.transformer.wpe.norm
+            del model.transformer.wte
+            del model.transformer.wpe
+            del self.model
+            gc.collect()
+            torch.cuda.empty_cache()
+    else:
+        if hasattr(self, "model"):
+            del self.model.model.transformer.wte.weight
+            del self.model.model.transformer.wte.norm
+            del self.model.model.transformer.wpe.weight
+            del self.model.model.transformer.wpe.norm
+            del self.model.model.transformer.wte
+            del self.model.model.transformer.wpe
+            del self.model
+            gc.collect()
+            torch.cuda.empty_cache()
 
     # Load a new model
     self.model = (
@@ -274,10 +288,13 @@ def load_state_from_peer(self, epoch=None, keep_recent=3):
 
 def cleanup_old_cache(self, keep_recent):
     """Helper method to clean up old cache files"""
-    model_config = (
-        self.model.module.config if hasattr(self.model, "module") else self.model.config
-    )
-    current_revision = model_config._commit_hash
+    current_revision = self.model.config._commit_hash
+    if torch.cuda.device_count() > 1:
+        model_config = (
+            self.model.module.config if hasattr(self.model, "module") else self.model.config
+        )
+        current_revision = model_config._commit_hash
+        
     cache_info = scan_cache_dir()
     for repo in cache_info.repos:
         if repo.repo_id == self.config.neuron.model_name:
