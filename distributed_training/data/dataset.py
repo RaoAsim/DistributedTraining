@@ -37,6 +37,8 @@ class DataLoader(IterableDataset):
     def __init__(
         self, batch_size, sequence_length, rows: typing.List[int], tokenizer=tokenizer
     ):
+        bt.logging.info("Initializing DataLoader")
+        start_time = time.time()
         self.batch_size = batch_size
         self.sequence_length = sequence_length
         self.tokenizer = tokenizer
@@ -55,8 +57,11 @@ class DataLoader(IterableDataset):
         self.total_batches = len(self.buffer) // (
             self.sequence_length * self.batch_size
         )
+        bt.logging.info(f"DataLoader initialized in {time.time() - start_time:.2f} seconds")
 
     def fetch_data_for_page(self, offset, length):
+        bt.logging.info(f"Fetching data: offset={offset}, length={length}")
+        start_time = time.time()
         iterations = math.ceil(length / 100)
         for iteration in range(iterations):
             self.params["offset"] = offset + (iteration * 100)
@@ -73,6 +78,7 @@ class DataLoader(IterableDataset):
                             "input_ids"
                         ]
                         self.buffer += [self.tokenizer.eos_token_id]
+                    bt.logging.info(f"Iteration {iteration + 1}/{iterations} completed in {time.time() - iter_start_time:.2f} seconds")
                     break  # If the request was successful, break out of the retry loop
                 except requests.exceptions.RequestException as e:
                     attempt += 1
@@ -86,11 +92,14 @@ class DataLoader(IterableDataset):
                             "Maximum retry limit reached. Unable to fetch data."
                         )
                         raise
+        bt.logging.info(f"Fetching data completed in {time.time() - start_time:.2f} seconds")
 
     def __len__(self):
         return self.total_batches
 
     def __iter__(self):
+        bt.logging.info("Starting iteration")
+        start_time = time.time()
         while len(self.buffer) >= self.sequence_length * self.batch_size:
             batch = []
             label = []
@@ -130,9 +139,13 @@ class DataLoader(IterableDataset):
                     )
 
                 self.buffer = self.buffer[self.sequence_length :]
+            bt.logging.info(f"Batch processed in {time.time() - batch_start_time:.2f} seconds")
             yield torch.stack(batch), torch.stack(label)
+        bt.logging.info(f"Iteration completed in {time.time() - start_time:.2f} seconds")
 
     def __next__(self):
+        bt.logging.info("Fetching next batch")
+        start_time = time.time()
         batch = []
         label = []
         for _ in range(self.batch_size):
@@ -169,4 +182,5 @@ class DataLoader(IterableDataset):
                 label.append(torch.tensor(self.buffer[1 : self.sequence_length + 1]))
 
             self.buffer = self.buffer[self.sequence_length :]
+        bt.logging.info(f"Next batch fetched in {time.time() - start_time:.2f} seconds")
         yield torch.stack(batch), torch.stack(label)
