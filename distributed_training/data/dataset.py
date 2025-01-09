@@ -64,6 +64,7 @@ class DataLoader(IterableDataset):
         start_time = time.time()
         iterations = math.ceil(length / 100)
         for iteration in range(iterations):
+            iter_start_time = time.time()
             self.params["offset"] = offset + (iteration * 100)
             self.params["length"] = min(100, length - (iteration * 100))
             attempt = 0
