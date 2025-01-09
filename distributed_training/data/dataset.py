@@ -102,6 +102,7 @@ class DataLoader(IterableDataset):
         bt.logging.info("Starting iteration")
         start_time = time.time()
         while len(self.buffer) >= self.sequence_length * self.batch_size:
+            batch_start_time = time.time()
             batch = []
             label = []
             for _ in range(self.batch_size):
