@@ -145,11 +145,10 @@ class DataLoader(IterableDataset):
                     label.append(torch.tensor(self.buffer[1 : self.sequence_length + 1]))
     
                 self.buffer = self.buffer[self.sequence_length:]  # Slice buffer
-                tokenization_duration = time.time() - tokenization_start_time
-                bt.logging.info(f"Tokenization and buffer slicing completed in {tokenization_duration:.2f} seconds")
+                
+                
     
-            batch_duration = time.time() - batch_start_time
-            bt.logging.info(f"Batch processed in {batch_duration:.2f} seconds")
+            
             yield torch.stack(batch), torch.stack(label)
     
         iteration_duration = time.time() - iteration_start_time
