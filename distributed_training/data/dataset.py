@@ -60,13 +60,12 @@ class DataLoader(IterableDataset):
         bt.logging.info(f"DataLoader initialized in {time.time() - start_time:.2f} seconds")
 
     def fetch_data_for_page(self, offset, length):
-        bt.logging.info(f"Fetching data: offset={offset}, length={length}")
     
         iterations = math.ceil(length / 100)
         tasks = []  # List to hold tasks for parallel execution
     
         # ThreadPoolExecutor for parallel requests
-        with ThreadPoolExecutor(max_workers=4) as executor:  # Two parallel tasks
+        with ThreadPoolExecutor(max_workers=3) as executor:  # Two parallel tasks
             for iteration in range(iterations):
                 iter_offset = offset + (iteration * 100)
                 iter_length = min(100, length - (iteration * 100))

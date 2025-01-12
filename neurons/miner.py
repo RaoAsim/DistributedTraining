@@ -491,16 +491,12 @@ class Miner(BaseMinerNeuron):
         self.dataset_indices[group] = True
 
                 
-        bt.logging.info(f"data indicing time: {time.perf_counter() - start_time}")
-            # Create dataloader and cache it
         dataloader = DataLoader(
                 batch_size=self.config.neuron.local_batch_size_train,
                 sequence_length=1024,
                 rows=group,
         )
 
-        above_function=time.perf_counter()-start_time
-        bt.logging.info(f" time in above function:{above_function} and gpu:{self.device}")
         synapse.batch_size = self.config.neuron.local_batch_size_train
         total_loss = 0
         gradient_sum_list = []
@@ -534,7 +530,6 @@ class Miner(BaseMinerNeuron):
             gradient_sum_list.append(torch.sum(torch.abs(gradient)).item())
 
             # Log accumulation status
-            bt.logging.info(f"Processed batch {index} in {time.perf_counter() - batch_start:.2f} seconds | Loss: {loss.detach().item():.2f}")
 
         if synapse.gradient_test_index >= len(gradient):
             bt.logging.error(
