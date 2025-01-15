@@ -26,7 +26,7 @@ from torch.utils.data import IterableDataset
 from transformers import AutoTokenizer
 
 model_name = "distilgpt2"
-tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False)
+tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
 tokenizer.pad_token = tokenizer.eos_token
 
 
@@ -60,45 +60,60 @@ class DataLoader(IterableDataset):
         bt.logging.info(f"DataLoader initialized in {time.time() - start_time:.2f} seconds")
 
     def fetch_data_for_page(self, offset, length):
-    
         iterations = math.ceil(length / 100)
-        tasks = []  # List to hold tasks for parallel execution
-    
-        # ThreadPoolExecutor for parallel requests
-        with ThreadPoolExecutor(max_workers=3) as executor:  # Two parallel tasks
+        all_texts = []  # To store all texts fetched from HTTP requests
+
+        # Step 1: Fetch all data in parallel
+        start_time = time.time()
+        with ThreadPoolExecutor(max_workers=9) as executor:  # Adjust workers as needed
+            futures = []
             for iteration in range(iterations):
                 iter_offset = offset + (iteration * 100)
                 iter_length = min(100, length - (iteration * 100))
-                
+
                 # Submit tasks for parallel execution
-                tasks.append(executor.submit(self._fetch_and_process, iter_offset, iter_length))
-    
-            # Process results as they complete
-            for future in as_completed(tasks):
+                futures.append(
+                    executor.submit(self._fetch_data, iter_offset, iter_length)
+                )
+
+            # Collect all texts from the responses
+            for future in as_completed(futures):
                 try:
-                    future.result()  # Raises any exception encountered during the task
+                    texts = future.result()
+                    all_texts.extend(texts)
                 except Exception as e:
                     bt.logging.error(f"Error during data fetch: {e}")
-        
-    
-    def _fetch_and_process(self, offset, length):
-        """Helper method to handle individual fetch and processing."""
+
+        # Step 2: Tokenize all texts in parallel
+        bt.logging.info(f"http time {time.time() - start_time:.2f} seconds")
+        start_time = time.time()
+        with ThreadPoolExecutor(max_workers=7) as executor:  # Adjust workers as needed
+            futures = [
+                executor.submit(self._tokenize_text, text) for text in all_texts
+            ]
+
+            # Collect tokenized results and extend the buffer
+            for future in as_completed(futures):
+                try:
+                    tokens = future.result()
+                    self.buffer.extend(tokens + [self.tokenizer.eos_token_id])
+                except Exception as e:
+                    bt.logging.error(f"Error during tokenization: {e}")
+                    
+    def _fetch_data(self, offset, length):
+        """Helper method to fetch data from the API."""
         attempt = 0
         while attempt < self.retry_limit:
             try:
-                # Measure HTTP request time
                 params = self.params.copy()
                 params.update({"offset": offset, "length": length})
                 response = requests.get(self.base_url, params=params)
-    
                 response.raise_for_status()
-    
-                for row in response.json()["rows"]:
-                    content = row["row"]["text"]
-                    self.buffer += self.tokenizer(content, truncation=True)["input_ids"]
-                    self.buffer += [self.tokenizer.eos_token_id]
-                break  # Exit retry loop if successful
-    
+
+                # Extract texts from the response
+                texts = [row["row"]["text"] for row in response.json()["rows"]]
+                return texts
+
             except requests.exceptions.RequestException as e:
                 attempt += 1
                 bt.logging.warning(f"Failed to fetch data. Attempt {attempt}/{self.retry_limit}. Error: {e}")
@@ -107,6 +122,11 @@ class DataLoader(IterableDataset):
                 else:
                     bt.logging.error("Maximum retry limit reached. Unable to fetch data.")
                     raise
+
+    def _tokenize_text(self, text):
+        """Helper method to tokenize a single text."""
+        return self.tokenizer(text, truncation=True, return_attention_mask=False)["input_ids"]
+
     def __len__(self):
         return self.total_batches
 
