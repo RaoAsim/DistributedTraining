@@ -56,33 +56,16 @@ def load_model_optimizer_gradient_averager(self, epoch):
         f"CPU Memory Before Loading State {psutil.virtual_memory().available / 10**9} GB"
     )
     # Delete existing model
-    if torch.cuda.device_count() > 1:
-        bt.logging.info(f"System has {torch.cuda.device_count()} GPUs, using DataParallel logic.")
-        # Handle deletion and cleanup for multi-GPU systems
-        if hasattr(self, "model"):
-            model = self.model.module if isinstance(self.model, torch.nn.DataParallel) else self.model
-            if hasattr(model, "transformer"):
-                del model.transformer.wte.weight
-                del model.transformer.wte.norm
-                del model.transformer.wpe.weight
-                del model.transformer.wpe.norm
-                del model.transformer.wte
-                del model.transformer.wpe
-
-            del self.model
-            gc.collect()
-            torch.cuda.empty_cache()
-    else:
-        if hasattr(self, "model"):
-            del self.model.model.transformer.wte.weight
-            del self.model.model.transformer.wte.norm
-            del self.model.model.transformer.wpe.weight
-            del self.model.model.transformer.wpe.norm
-            del self.model.model.transformer.wte
-            del self.model.model.transformer.wpe
-            del self.model
-            gc.collect()
-            torch.cuda.empty_cache()
+    if hasattr(self, "model"):
+        del self.model.model.transformer.wte.weight
+        del self.model.model.transformer.wte.norm
+        del self.model.model.transformer.wpe.weight
+        del self.model.model.transformer.wpe.norm
+        del self.model.model.transformer.wte
+        del self.model.model.transformer.wpe
+        del self.model
+        gc.collect()
+        torch.cuda.empty_cache()
 
     # Load a new model
     self.model = (
@@ -95,10 +78,6 @@ def load_model_optimizer_gradient_averager(self, epoch):
         )
     )
     # Move the model to the appropriate device
-    if torch.cuda.device_count() > 1:
-        bt.logging.info(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
-        self.model = torch.nn.DataParallel(self.model)
-        
     self.model = self.model.to(self.device)
 
     # Delete any historic model references in GlobalOptimManager
@@ -205,7 +184,7 @@ def load_model_optimizer_gradient_averager(self, epoch):
     )
 
 
-def load_state_from_peer(self, epoch=None, keep_recent=3):
+def load_state_from_peer(self, epoch=None):
     # Skip if we're already loading or if we've already loaded this epoch
     if self.model_loading_manager.is_loading:
         bt.logging.info(
@@ -268,7 +247,7 @@ def load_state_from_peer(self, epoch=None, keep_recent=3):
 
             # Clean up old cache
             try:
-                cleanup_old_cache(self, keep_recent)
+                cleanup_old_cache(self)
             except Exception as e:
                 bt.logging.warning(f"Failed to cleanup cache: {str(e)}")
 
@@ -288,32 +267,30 @@ def load_state_from_peer(self, epoch=None, keep_recent=3):
         return False
 
 
-def cleanup_old_cache(self, keep_recent):
+def cleanup_old_cache(self):
     """Helper method to clean up old cache files"""
     current_revision = self.model.config._commit_hash
-    if torch.cuda.device_count() > 1:
-        model_config = (
-            self.model.module.config if hasattr(self.model, "module") else self.model.config
-        )
-        current_revision = model_config._commit_hash
-        
     cache_info = scan_cache_dir()
+    bt.logging.info("Cache clearing warnings:")
+    bt.logging.info(f"{cache_info.warnings}")
+
     for repo in cache_info.repos:
         if repo.repo_id == self.config.neuron.model_name:
             revisions = sorted(
                 repo.revisions, key=lambda r: r.last_modified, reverse=True
             )
-            current_index = next(
-                (
-                    i
-                    for i, r in enumerate(revisions)
-                    if r.commit_hash == current_revision
-                ),
-                None,
-            )
-            if current_index is not None:
-                for revision in revisions[max(current_index + 1, keep_recent) :]:
-                    cache_info.delete_revisions(revision.commit_hash).execute()
+            if current_revision is not None:
+                bt.logging.info(
+                    f"Found {len(revisions)} model revisions in .cache folder. Proceeding to delete all non-current revision."
+                )
+                for revision in revisions:
+                    if revision.commit_hash == current_revision:
+                        continue
+                    else:
+                        bt.logging.info(
+                            f"Deleting cache for revision {revision.commit_hash}"
+                        )
+                        cache_info.delete_revisions(revision.commit_hash).execute()
             break
 
 
