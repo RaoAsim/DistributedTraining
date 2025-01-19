@@ -104,6 +104,7 @@ class DataLoader(IterableDataset):
     def _fetch_data(self, offset, length):
         """Helper method to fetch data from the API."""
         attempt = 0
+        bt.logging.info(f"offset:{offset} length:{length}")
         while attempt < self.retry_limit:
             try:
                 params = self.params.copy()
