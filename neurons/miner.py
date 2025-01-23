@@ -541,6 +541,7 @@ class Miner(BaseMinerNeuron):
                 batch_size=self.config.neuron.local_batch_size_train,
                 sequence_length=1024,
                 rows=group,
+                download_complete=self.download_complete
         )
 
         synapse.batch_size = self.config.neuron.local_batch_size_train
