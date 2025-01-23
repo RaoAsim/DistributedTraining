@@ -108,7 +108,7 @@ class DataLoader(IterableDataset):
             try:
                 self.dataset = load_from_disk(self.dataset_path)
             except Exception as e:
-                print("error")
+                bt.logging.error(f"Error load dataset: {e}")
 
     def get_batch(self,offset: int, length: int):
         if not self.download_complete:
