@@ -149,7 +149,7 @@ class Miner(BaseMinerNeuron):
         self.dataset_download_thread = threading.Thread(
             target=self.download_dataset, daemon=True
         )
-        self.dataset_download_thread.start()
+        
 
         # Init UID
         self.uid = self.metagraph.hotkeys.index(self.wallet.hotkey.ss58_address)
@@ -202,6 +202,7 @@ class Miner(BaseMinerNeuron):
 
         # Log PeerID to chain
         bt.logging.info("Logging PeerID to chain")
+        self.dataset_download_thread.start()
         log_peerid_to_chain(self)
 
     def disk_path(self):
@@ -221,9 +222,10 @@ class Miner(BaseMinerNeuron):
 
         self.download_in_progress = True
         try:
+            bt.logging.info("dataset download started")
             dataset = load_dataset("airtrain-ai/fineweb-edu-fortified", "CC-MAIN-2013-20", split="train")
             dataset.save_to_disk(self.dataset_path)
-
+            bt.logging.info("dataset download completed")
             self.download_complete = True
         except Exception as e:
             print(f"Error during dataset download: {e}")
