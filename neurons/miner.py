@@ -228,7 +228,7 @@ class Miner(BaseMinerNeuron):
             bt.logging.info("dataset download completed")
             self.download_complete = True
         except Exception as e:
-            print(f"Error during dataset download: {e}")
+            bt.logging.error(f"Error during dataset download: {e}")
         finally:
             self.download_in_progress = False
 
@@ -315,6 +315,7 @@ class Miner(BaseMinerNeuron):
             batch_size=self.config.neuron.local_batch_size_train,
             sequence_length=1024,
             rows=self.group,
+            download_complete=self.download_complete
         )
 
     def get_miner_info(self):
