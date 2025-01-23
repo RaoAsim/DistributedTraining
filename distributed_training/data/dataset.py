@@ -119,7 +119,7 @@ class DataLoader(IterableDataset):
             rows = []
             for i in range(offset, offset + length):
                 try:
-                    row = dataset[i]
+                    row = self.dataset[i]
                     if isinstance(row, dict):
                         rows.append({
                             "row_idx": i,
@@ -128,7 +128,9 @@ class DataLoader(IterableDataset):
                         })
                     else:
                         print(f"Skipping row {i}: {row}")
-                
+                except Exception as e:
+                    print(f"Error fetching row {i}: {e}")
+                    
             # Define the features
             features = [
                 {"feature_idx": idx,"name": name,"type": { "_type": _type,"dtype": dtype} if _type != "Sequence" else {"_type": _type,"feature": {"_type": "Value", "dtype": dtype}}}
