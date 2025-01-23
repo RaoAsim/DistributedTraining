@@ -215,7 +215,7 @@ class Miner(BaseMinerNeuron):
 
     def download_dataset(self):
         """Background task to download the dataset."""
-        if os.path.exists(self.dataset_path):
+        if os.path.exists(self.dataset_path) and os.listdir(self.dataset_path):
             self.download_complete = True
             bt.logging.info("dataset exist")
             return
