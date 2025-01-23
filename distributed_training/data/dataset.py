@@ -47,7 +47,7 @@ class DataLoader(IterableDataset):
         self.params = { }
         self.rows = rows
         self.buffer = []
-        self.dataset=None
+        self.dataset=load_dataset_from_disk()
         self.download_complete=download_complete
         self.retry_limit = 10  # Number of retries
         self.retry_delay = 5  # Seconds to wait between retries
@@ -116,18 +116,19 @@ class DataLoader(IterableDataset):
         try:
             if self.dataset is None:
                 self.load_dataset_from_disk()
-
             rows = []
-            rows = [
-                {
-                    "row_idx": idx,
-                    "row": row,
-                    "truncated_cells": []  # Assuming no truncation
-                }
-                for idx, row in enumerate(self.dataset.select(range(offset, offset + length)))
-            ]
+            for i in range(offset, offset + length):
+                try:
+                    row = dataset[i]
+                    if isinstance(row, dict):
+                        rows.append({
+                            "row_idx": i,
+                            "row": row,
+                            "truncated_cells": []  # Assuming no cells are truncated
+                        })
+                    else:
+                        print(f"Skipping row {i}: {row}")
                 
-
             # Define the features
             features = [
                 {"feature_idx": idx,"name": name,"type": { "_type": _type,"dtype": dtype} if _type != "Sequence" else {"_type": _type,"feature": {"_type": "Value", "dtype": dtype}}}
@@ -159,7 +160,7 @@ class DataLoader(IterableDataset):
 
             return response
         except Exception as e:
-            print(f"Unhandled error in /get_batch: {e}")
+            bt.logging.error(f"Unhandled error in /get_batch: {e}")
        
 
     def _fetch_data(self, offset, length):
