@@ -36,7 +36,7 @@ class DataLoader(IterableDataset):
     max_rows: int = 10_800_000
 
     def __init__(
-        self, batch_size, sequence_length, rows: typing.List[int], tokenizer=tokenizer
+        self, batch_size, sequence_length, rows: typing.List[int], tokenizer=tokenizer,download_complete
     ):
         bt.logging.info("Initializing DataLoader")
         start_time = time.time()
@@ -47,6 +47,8 @@ class DataLoader(IterableDataset):
         self.params = { }
         self.rows = rows
         self.buffer = []
+        self.dataset=None
+        self.download_complete=download_complete
         self.retry_limit = 10  # Number of retries
         self.retry_delay = 5  # Seconds to wait between retries
         self.fetch_data_for_page(min(self.rows), len(self.rows))
