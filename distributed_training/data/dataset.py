@@ -51,6 +51,7 @@ class DataLoader(IterableDataset):
         self.download_complete=download_complete
         self.retry_limit = 10  # Number of retries
         self.retry_delay = 5  # Seconds to wait between retries
+        self.load_dataset_from_disk()
         self.fetch_data_for_page(min(self.rows), len(self.rows))
 
         self.total_batches = len(self.buffer) // (
@@ -102,11 +103,14 @@ class DataLoader(IterableDataset):
 
     
     def load_dataset_from_disk(self):
+        bt.logging.info(f"path: {self.dataset_path}")
         if not self.download_complete:
-            print("Dataset not downloaded yet.")
+            bt.logging.info("Dataset not downloaded yet.")
         if self.dataset is None:
             try:
-                self.dataset = load_from_disk(self.dataset_path)
+                dataset_local = load_from_disk(self.dataset_path)
+                self.dataset=dataset_local
+                return dataset_local
             except Exception as e:
                 bt.logging.error(f"Error load dataset: {e}")
 
@@ -115,7 +119,8 @@ class DataLoader(IterableDataset):
             return 
         try:
             if self.dataset is None:
-                self.load_dataset_from_disk()
+                self.dataset = load_from_disk(self.dataset_path)
+                bt.logging.info(f"Dataset successfully loaded. Total rows: {len(self.dataset)}")
             rows = []
             for i in range(offset, offset + length):
                 try:
@@ -127,9 +132,9 @@ class DataLoader(IterableDataset):
                             "truncated_cells": []  # Assuming no cells are truncated
                         })
                     else:
-                        print(f"Skipping row {i}: {row}")
+                        bt.logging.error(f"Skipping row {i}: {row}")
                 except Exception as e:
-                    print(f"Error fetching row {i}: {e}")
+                    bt.logging.error(f"Error fetching row {i}: {e}")
                     
             # Define the features
             features = [
@@ -170,10 +175,18 @@ class DataLoader(IterableDataset):
         attempt = 0
         while attempt < self.retry_limit:
             try:
+                texts = None
                 response = self.get_batch(offset, length)
-
-                # Extract texts from the response
-                texts = [row["row"]["text"] for row in response["rows"]]
+                
+                if response is None:
+                    params = self.params.copy()
+                    params.update({"offset": offset, "length": length})
+                    response = requests.get(self.base_url, params=params)
+                    response.raise_for_status()
+                    texts=[row["row"]["text"] for row in response.json()["rows"]]
+                else:
+                    bt.logging.warning("Trying new way")
+                    texts = [row["row"]["text"] for row in response["rows"]]
                 return texts
 
             except requests.exceptions.RequestException as e:
