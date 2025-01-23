@@ -36,7 +36,7 @@ class DataLoader(IterableDataset):
     max_rows: int = 10_800_000
 
     def __init__(
-        self, batch_size, sequence_length, rows: typing.List[int], tokenizer=tokenizer,download_complete
+        self, batch_size, sequence_length, download_complete, rows: typing.List[int], tokenizer=tokenizer
     ):
         bt.logging.info("Initializing DataLoader")
         start_time = time.time()
