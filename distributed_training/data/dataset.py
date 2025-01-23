@@ -47,7 +47,7 @@ class DataLoader(IterableDataset):
         self.params = { }
         self.rows = rows
         self.buffer = []
-        self.dataset=self.load_dataset_from_disk()
+        self.dataset = None
         self.download_complete=download_complete
         self.retry_limit = 10  # Number of retries
         self.retry_delay = 5  # Seconds to wait between retries
