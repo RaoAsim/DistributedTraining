@@ -101,12 +101,12 @@ class DataLoader(IterableDataset):
     
     def load_dataset_from_disk(self):
         if not self.download_complete:
-            raise Exception("Dataset not downloaded yet.")
+            print("Dataset not downloaded yet.")
         if self.dataset is None:
             try:
                 self.dataset = load_from_disk(self.dataset_path)
             except Exception as e:
-                raise
+                print("error")
 
     def get_batch(self,offset: int, length: int):
         if not self.download_complete:
@@ -178,7 +178,6 @@ class DataLoader(IterableDataset):
                     time.sleep(self.retry_delay)
                 else:
                     bt.logging.error("Maximum retry limit reached. Unable to fetch data.")
-                    raise
 
     def _tokenize_text(self, text):
         """Helper method to tokenize a single text."""
