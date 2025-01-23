@@ -24,6 +24,7 @@ import requests
 import torch
 from torch.utils.data import IterableDataset
 from transformers import AutoTokenizer
+from datasets import load_dataset, load_from_disk
 
 model_name = "distilgpt2"
 tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
@@ -95,19 +96,79 @@ class DataLoader(IterableDataset):
                     self.buffer.extend(tokens + [self.tokenizer.eos_token_id])
                 except Exception as e:
                     bt.logging.error(f"Error during tokenization: {e}")
-                    
+
+
+    
+    def load_dataset_from_disk(self):
+        if not self.download_complete:
+            raise Exception("Dataset not downloaded yet.")
+        if self.dataset is None:
+            try:
+                self.dataset = load_from_disk(self.dataset_path)
+            except Exception as e:
+                raise
+
+    def get_batch(self,offset: int, length: int):
+        if not self.download_complete:
+            return 
+        try:
+            if self.dataset is None:
+                self.load_dataset_from_disk()
+
+            rows = []
+            rows = [
+                {
+                    "row_idx": idx,
+                    "row": row,
+                    "truncated_cells": []  # Assuming no truncation
+                }
+                for idx, row in enumerate(self.dataset.select(range(offset, offset + length)))
+            ]
+                
+
+            # Define the features
+            features = [
+                {"feature_idx": idx,"name": name,"type": { "_type": _type,"dtype": dtype} if _type != "Sequence" else {"_type": _type,"feature": {"_type": "Value", "dtype": dtype}}}
+                for idx, (name, dtype, _type) in enumerate([
+                    ("text", "string", "Value"),
+                    ("id", "string", "Value"),
+                    ("dump", "string", "Value"),
+                    ("url", "string", "Value"),
+                    ("file_path", "string", "Value"),
+                    ("language", "string", "Value"),
+                    ("language_score", "float64", "Value"),
+                    ("token_count", "int64", "Value"),
+                    ("score", "float64", "Value"),
+                    ("int_score", "int64", "Value"),
+                    ("embedding", "float32", "Sequence"),
+                    ("count", "int64", "Value"),
+                ])
+            ]
+            
+
+            #
+            response = {
+                "features": features,
+                "rows": rows,
+                "num_rows_total":10800000,
+                "num_rows_per_page":length,
+                "partial":False
+            }
+
+            return response
+        except Exception as e:
+            print(f"Unhandled error in /get_batch: {e}")
+       
+
     def _fetch_data(self, offset, length):
         """Helper method to fetch data from the API."""
         attempt = 0
         while attempt < self.retry_limit:
             try:
-                params = self.params.copy()
-                params.update({"offset": offset, "length": length})
-                response = requests.get(self.base_url, params=params)
-                response.raise_for_status()
+                response = self.get_batch(offset, length)
 
                 # Extract texts from the response
-                texts = [row["row"]["text"] for row in response.json()["rows"]]
+                texts = [row["row"]["text"] for row in response["rows"]]
                 return texts
 
             except requests.exceptions.RequestException as e:
