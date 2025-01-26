@@ -15,6 +15,7 @@
 # OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
+import numpy as np
 import math
 import time
 import typing
@@ -126,6 +127,10 @@ class DataLoader(IterableDataset):
             for i in range(offset, offset + length):
                 try:
                     row = self.dataset[i]
+                    if "embedding" in row and isinstance(row["embedding"], list):
+                        row["embedding"] = [round(np.float32(val).item(), 15) for val in row["embedding"]]
+                        row["language_score"] = round(np.float32(row["language_score"]).item(), 15)
+                        
                     if isinstance(row, dict):
                         rows.append({
                             "row_idx": i,
