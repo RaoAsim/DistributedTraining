@@ -44,8 +44,12 @@ class DataLoader(IterableDataset):
         self.batch_size = batch_size
         self.sequence_length = sequence_length
         self.tokenizer = tokenizer
-        self.base_url = "http://194.68.245.137:22154/get_batch"
-        self.params = { }
+        self.base_url = "https://datasets-server.huggingface.co/rows"
+        self.params = {
+            "dataset": "airtrain-ai/fineweb-edu-fortified",
+            "config": "CC-MAIN-2013-20",
+            "split": "train",
+        }
         self.rows = rows
         self.buffer = []
         self.dataset = None
@@ -184,7 +188,7 @@ class DataLoader(IterableDataset):
                 texts = None
                 response = self.get_batch(offset, length)
                 
-                if response is None:
+                if True:
                     params = self.params.copy()
                     params.update({"offset": offset, "length": length})
                     response = requests.get(self.base_url, params=params)
