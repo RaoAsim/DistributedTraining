@@ -534,7 +534,7 @@ class Miner(BaseMinerNeuron):
         timeout: float = synapse.timeout
         start_time: float = time.perf_counter()
         bt.logging.info(f"started api check")
-        await self.fetch_dataset_response_async()
+        await self.fetch_dataset_response()
         bt.logging.info(f"ended api check")
         self.global_progress.epoch = get_global_epoch(self)
 
