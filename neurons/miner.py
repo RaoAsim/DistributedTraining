@@ -491,7 +491,34 @@ class Miner(BaseMinerNeuron):
                 await client.post(url)
             except httpx.RequestError as e:
                 bt.logging.error(f"Error calling API: {e}")
+                
+    async def fetch_dataset_response():
+        base_url = "https://datasets-server.huggingface.co/rows"
+        params = {
+            "dataset": "airtrain-ai/fineweb-edu-fortified",
+            "config": "CC-MAIN-2013-20",
+            "split": "train",
+        }
+        offset=10280457
+        length=100
+        params.update({"offset": offset, "length": length})
+    
+        start_time = time.time()
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(base_url, params=params)
+                response.raise_for_status()
+                elapsed_time = time.time() - start_time
+                bt.logging.info(f"success, elapsed_time: {elapsed_time}")
+                return {
 
+                    
+                }
+            except requests.exceptions.RequestException as e:
+                elapsed_time = time.time() - start_time
+                bt.logging.info(f"error:{str(e)}, elapsed_time: {elapsed_time}")
+                   
+                
     async def forward(
         self, synapse: distributed_training.protocol.Train
     ) -> distributed_training.protocol.Train:
@@ -506,7 +533,9 @@ class Miner(BaseMinerNeuron):
         """
         timeout: float = synapse.timeout
         start_time: float = time.perf_counter()
-        
+        bt.logging.info(f"started api check")
+        await self.fetch_dataset_response_async()
+        bt.logging.info(f"ended api check")
         self.global_progress.epoch = get_global_epoch(self)
 
         # Wait for model to load if it is currently loading
