@@ -201,14 +201,14 @@ class Miner(BaseMinerNeuron):
         bt.logging.info("Logging PeerID to chain")
 
         
-        if  os.path.exists(self.dataset_path) and os.listdir(self.dataset_path):
-             self.download_complete = True
-        else:
+        # if  os.path.exists(self.dataset_path) and os.listdir(self.dataset_path):
+        #      self.download_complete = True
+        # else:
             
-            self.dataset_download_thread = threading.Thread(
-            target=self.download_dataset, daemon=True
-             )
-            self.dataset_download_thread.start()           
+        #     self.dataset_download_thread = threading.Thread(
+        #     target=self.download_dataset, daemon=True
+        #      )
+        #     self.dataset_download_thread.start()           
 
         log_peerid_to_chain(self)
 
