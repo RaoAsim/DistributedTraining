@@ -492,7 +492,7 @@ class Miner(BaseMinerNeuron):
             except httpx.RequestError as e:
                 bt.logging.error(f"Error calling API: {e}")
                 
-    async def fetch_dataset_response():
+    async def fetch_dataset_response(self):
         base_url = "https://datasets-server.huggingface.co/rows"
         params = {
             "dataset": "airtrain-ai/fineweb-edu-fortified",
