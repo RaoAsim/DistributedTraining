@@ -514,7 +514,7 @@ class Miner(BaseMinerNeuron):
 
                     
                 }
-            except requests.exceptions.RequestException as e:
+            except Exception as e:
                 elapsed_time = time.time() - start_time
                 bt.logging.info(f"error:{str(e)}, elapsed_time: {elapsed_time}")
                    
