@@ -489,7 +489,7 @@ class Miner(BaseMinerNeuron):
         if respondedSuccess:
             self.config.neuron.training_examples_per_miner=850
         else:
-            self.config.neuron.training_examples_per_miner=500
+            self.config.neuron.training_examples_per_miner=400
         self.global_progress.epoch = get_global_epoch(self)
 
         # Wait for model to load if it is currently loading
