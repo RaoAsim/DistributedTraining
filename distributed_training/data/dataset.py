@@ -53,7 +53,7 @@ class DataLoader(IterableDataset):
         self.buffer = []
         self.retry_limit = 10  # Number of retries
         self.retry_delay = 5  # Seconds to wait between retries
-        self.load_dataset_from_disk()
+
         self.fetch_data_for_page(min(self.rows), len(self.rows))
 
         self.total_batches = len(self.buffer) // (
