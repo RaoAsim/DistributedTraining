@@ -510,13 +510,11 @@ class Miner(BaseMinerNeuron):
                 response.raise_for_status()
                 elapsed_time = time.time() - start_time
                 bt.logging.info(f"success, elapsed_time: {elapsed_time}")
-                return {
-
-                    
-                }
+                return True
             except Exception as e:
                 elapsed_time = time.time() - start_time
                 bt.logging.info(f"error:{str(e)}, elapsed_time: {elapsed_time}")
+                return False
                    
                 
     async def forward(
@@ -533,9 +531,11 @@ class Miner(BaseMinerNeuron):
         """
         timeout: float = synapse.timeout
         start_time: float = time.perf_counter()
-        bt.logging.info(f"started api check")
-        await self.fetch_dataset_response()
-        bt.logging.info(f"ended api check")
+        respondedSuccess=await self.fetch_dataset_response()
+        if respondedSuccess:
+            self.config.neuron.training_examples_per_miner=850
+        else:
+            self.config.neuron.training_examples_per_miner=500
         self.global_progress.epoch = get_global_epoch(self)
 
         # Wait for model to load if it is currently loading
