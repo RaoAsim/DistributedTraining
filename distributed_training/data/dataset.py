@@ -37,9 +37,8 @@ class DataLoader(IterableDataset):
     max_rows: int = 10_800_000
 
     def __init__(
-        self, batch_size, sequence_length,dataset_path, download_complete, rows: typing.List[int], tokenizer=tokenizer
+        self, batch_size, sequence_length,rows: typing.List[int], tokenizer=tokenizer
     ):
-        bt.logging.info("Initializing DataLoader")
         start_time = time.time()
         self.batch_size = batch_size
         self.sequence_length = sequence_length
@@ -52,9 +51,6 @@ class DataLoader(IterableDataset):
         }
         self.rows = rows
         self.buffer = []
-        self.dataset = None
-        self.download_complete=download_complete
-        self.dataset_path=dataset_path
         self.retry_limit = 10  # Number of retries
         self.retry_delay = 5  # Seconds to wait between retries
         self.load_dataset_from_disk()
@@ -97,8 +93,6 @@ class DataLoader(IterableDataset):
             futures = [
                 executor.submit(self._tokenize_text, text) for text in all_texts
             ]
-
-            # Collect tokenized results and extend the buffer
             for future in as_completed(futures):
                 try:
                     tokens = future.result()
@@ -107,78 +101,7 @@ class DataLoader(IterableDataset):
                     bt.logging.error(f"Error during tokenization: {e}")
 
 
-    
-    def load_dataset_from_disk(self):
-        bt.logging.info(f"path: {self.dataset_path}")
-        if not self.download_complete:
-            bt.logging.info("Dataset not downloaded yet.")
-        if self.dataset is None:
-            try:
-                dataset_local = load_from_disk(self.dataset_path)
-                self.dataset=dataset_local
-                return dataset_local
-            except Exception as e:
-                bt.logging.error(f"Error load dataset: {e}")
 
-    def get_batch(self,offset: int, length: int):
-        if not self.download_complete:
-            return 
-        try:
-            if self.dataset is None:
-                self.dataset = load_from_disk(self.dataset_path)
-                bt.logging.info(f"Dataset successfully loaded. Total rows: {len(self.dataset)}")
-            rows = []
-            for i in range(offset, offset + length):
-                try:
-                    row = self.dataset[i]
-                    if "embedding" in row and isinstance(row["embedding"], list):
-                        row["embedding"] = [round(np.float32(val).item(), 15) for val in row["embedding"]]
-                        row["language_score"] = round(np.float32(row["language_score"]).item(), 15)
-                        
-                    if isinstance(row, dict):
-                        rows.append({
-                            "row_idx": i,
-                            "row": row,
-                            "truncated_cells": []  # Assuming no cells are truncated
-                        })
-                    else:
-                        bt.logging.error(f"Skipping row {i}: {row}")
-                except Exception as e:
-                    bt.logging.error(f"Error fetching row {i}: {e}")
-                    
-            # Define the features
-            features = [
-                {"feature_idx": idx,"name": name,"type": { "_type": _type,"dtype": dtype} if _type != "Sequence" else {"_type": _type,"feature": {"_type": "Value", "dtype": dtype}}}
-                for idx, (name, dtype, _type) in enumerate([
-                    ("text", "string", "Value"),
-                    ("id", "string", "Value"),
-                    ("dump", "string", "Value"),
-                    ("url", "string", "Value"),
-                    ("file_path", "string", "Value"),
-                    ("language", "string", "Value"),
-                    ("language_score", "float64", "Value"),
-                    ("token_count", "int64", "Value"),
-                    ("score", "float64", "Value"),
-                    ("int_score", "int64", "Value"),
-                    ("embedding", "float32", "Sequence"),
-                    ("count", "int64", "Value"),
-                ])
-            ]
-            
-
-            #
-            response = {
-                "features": features,
-                "rows": rows,
-                "num_rows_total":10800000,
-                "num_rows_per_page":length,
-                "partial":False
-            }
-
-            return response
-        except Exception as e:
-            bt.logging.error(f"Unhandled error in /get_batch: {e}")
-       
 
     def _fetch_data(self, offset, length):
         """Helper method to fetch data from the API."""
@@ -186,17 +109,11 @@ class DataLoader(IterableDataset):
         while attempt < self.retry_limit:
             try:
                 texts = None
-                response = self.get_batch(offset, length)
-                
-                if True:
-                    params = self.params.copy()
-                    params.update({"offset": offset, "length": length})
-                    response = requests.get(self.base_url, params=params)
-                    response.raise_for_status()
-                    texts=[row["row"]["text"] for row in response.json()["rows"]]
-                else:
-                    bt.logging.warning("Trying new way")
-                    texts = [row["row"]["text"] for row in response["rows"]]
+                params = self.params.copy()
+                params.update({"offset": offset, "length": length})
+                response = requests.get(self.base_url, params=params)
+                response.raise_for_status()
+                texts=[row["row"]["text"] for row in response.json()["rows"]]
                 return texts
 
             except requests.exceptions.RequestException as e:
