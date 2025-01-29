@@ -487,7 +487,7 @@ class Miner(BaseMinerNeuron):
         start_time: float = time.perf_counter()
         respondedSuccess=await self.fetch_dataset_response()
         if respondedSuccess:
-            self.config.neuron.training_examples_per_miner=850
+            self.config.neuron.training_examples_per_miner=775
         else:
             self.config.neuron.training_examples_per_miner=400
         self.global_progress.epoch = get_global_epoch(self)
