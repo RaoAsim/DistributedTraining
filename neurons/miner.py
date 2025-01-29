@@ -142,11 +142,6 @@ class Miner(BaseMinerNeuron):
 
         # Init Device
         self.device = self.config.neuron.device
-        self.dataset_path = self.disk_path()
-        self.download_complete = False
-        self.download_in_progress = False
-        self.dataset=None
-
 
         # Init UID
         self.uid = self.metagraph.hotkeys.index(self.wallet.hotkey.ss58_address)
@@ -196,48 +191,9 @@ class Miner(BaseMinerNeuron):
             target=self.load_latest_model, daemon=True
         )
         self.update_model_thread.start()
-
-        # Log PeerID to chain
-        bt.logging.info("Logging PeerID to chain")
-
-        
-        # if  os.path.exists(self.dataset_path) and os.listdir(self.dataset_path):
-        #      self.download_complete = True
-        # else:
-            
-        #     self.dataset_download_thread = threading.Thread(
-        #     target=self.download_dataset, daemon=True
-        #      )
-        #     self.dataset_download_thread.start()           
-
+        bt.logging.info("Logging PeerID to chain")         
         log_peerid_to_chain(self)
 
-    def disk_path(self):
-        current_script_path = Path(__file__).resolve()
-        repo_parent_path = current_script_path.parent.parent.parent
-        dataset_path = repo_parent_path / "local_fineweb_dataset"
-        dataset_path.mkdir(parents=True, exist_ok=True)
-        return dataset_path
-   
-
-    def download_dataset(self):
-        """Background task to download the dataset."""
-        if os.path.exists(self.dataset_path) and os.listdir(self.dataset_path):
-            self.download_complete = True
-            bt.logging.info("dataset exist")
-            return
-
-        self.download_in_progress = True
-        try:
-            bt.logging.info("dataset download started")
-            dataset = load_dataset("airtrain-ai/fineweb-edu-fortified", "CC-MAIN-2013-20", split="train")
-            dataset.save_to_disk(self.dataset_path)
-            bt.logging.info("dataset download completed")
-            self.download_complete = True
-        except Exception as e:
-            bt.logging.error(f"Error during dataset download: {e}")
-        finally:
-            self.download_in_progress = False
 
     def start_dataloader_thread(self):
         """Start a new dataloader thread if the previous one is finished"""
@@ -322,8 +278,6 @@ class Miner(BaseMinerNeuron):
             batch_size=self.config.neuron.local_batch_size_train,
             sequence_length=1024,
             rows=self.group,
-            download_complete=self.download_complete,
-            dataset_path=self.dataset_path
         )
 
     def get_miner_info(self):
@@ -581,8 +535,6 @@ class Miner(BaseMinerNeuron):
                 batch_size=self.config.neuron.local_batch_size_train,
                 sequence_length=1024,
                 rows=group,
-                download_complete=self.download_complete,
-                dataset_path=self.dataset_path
         )
 
         synapse.batch_size = self.config.neuron.local_batch_size_train
