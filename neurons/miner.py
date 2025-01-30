@@ -464,11 +464,11 @@ class Miner(BaseMinerNeuron):
                 response.raise_for_status()
                 elapsed_time = time.time() - start_time
                 bt.logging.info(f"success, elapsed_time: {elapsed_time}")
-                return True
+                return True, elapsed_time
             except Exception as e:
                 elapsed_time = time.time() - start_time
                 bt.logging.info(f"error:{str(e)}, elapsed_time: {elapsed_time}")
-                return False
+                return False, elapsed_time
                    
                 
     async def forward(
@@ -485,11 +485,13 @@ class Miner(BaseMinerNeuron):
         """
         timeout: float = synapse.timeout
         start_time: float = time.perf_counter()
-        respondedSuccess=await self.fetch_dataset_response()
-        if respondedSuccess:
-            self.config.neuron.training_examples_per_miner=775
+        responded_success, elapsed_time = await self.fetch_dataset_response()
+        if responded_success and elapsed_time > 4.4:
+            self.config.neuron.training_examples_per_miner = 650
+        elif responded_success:
+            self.config.neuron.training_examples_per_miner = 800
         else:
-            self.config.neuron.training_examples_per_miner=400
+            self.config.neuron.training_examples_per_miner = 400
         self.global_progress.epoch = get_global_epoch(self)
 
         # Wait for model to load if it is currently loading
@@ -511,7 +513,6 @@ class Miner(BaseMinerNeuron):
             )
             load_state_from_peer(self, epoch=self.global_progress.epoch)
 
-        bt.logging.info(f"load state time: {time.perf_counter() - start_time}")
         search_start = random.choice(
             range(
                 len(self.dataset_indices)
