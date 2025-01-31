@@ -492,6 +492,8 @@ class Miner(BaseMinerNeuron):
             self.config.neuron.training_examples_per_miner = 800
         else:
             self.config.neuron.training_examples_per_miner = 400
+
+        bt.logging.info(f"Training Size: {self.config.neuron.training_examples_per_miner}.")
         self.global_progress.epoch = get_global_epoch(self)
 
         # Wait for model to load if it is currently loading
