@@ -25,7 +25,6 @@ import requests
 import torch
 from torch.utils.data import IterableDataset
 from transformers import AutoTokenizer
-from datasets import load_dataset, load_from_disk
 
 model_name = "distilgpt2"
 tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
@@ -67,7 +66,7 @@ class DataLoader(IterableDataset):
 
         # Step 1: Fetch all data in parallel
         start_time = time.time()
-        with ThreadPoolExecutor(max_workers=9) as executor:  # Adjust workers as needed
+        with ThreadPoolExecutor(max_workers=5) as executor:  # Adjust workers as needed
             futures = []
             for iteration in range(iterations):
                 iter_offset = offset + (iteration * 100)
@@ -89,18 +88,16 @@ class DataLoader(IterableDataset):
         # Step 2: Tokenize all texts in parallel
         bt.logging.info(f"http time {time.time() - start_time:.2f} seconds")
         start_time = time.time()
-        with ThreadPoolExecutor(max_workers=7) as executor:  # Adjust workers as needed
-            futures = [
-                executor.submit(self._tokenize_text, text) for text in all_texts
-            ]
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(self._tokenize_text, text) for text in all_texts]
             for future in as_completed(futures):
                 try:
                     tokens = future.result()
                     self.buffer.extend(tokens + [self.tokenizer.eos_token_id])
+                    if len(self.buffer) > self.max_buffer_size:
+                        self.buffer = self.buffer[-self.max_buffer_size:]
                 except Exception as e:
                     bt.logging.error(f"Error during tokenization: {e}")
-
-
 
 
     def _fetch_data(self, offset, length):
@@ -164,7 +161,7 @@ class DataLoader(IterableDataset):
                 else:
                     label.append(torch.tensor(self.buffer[1 : self.sequence_length + 1]))
     
-                self.buffer = self.buffer[self.sequence_length:]  # Slice buffer
+                del self.buffer[:self.sequence_length] # Slice buffer
             
             yield torch.stack(batch), torch.stack(label)
 
