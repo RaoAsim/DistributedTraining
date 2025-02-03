@@ -88,14 +88,14 @@ class DataLoader(IterableDataset):
         # Step 2: Tokenize all texts in parallel
         bt.logging.info(f"http time {time.time() - start_time:.2f} seconds")
         start_time = time.time()
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = [executor.submit(self._tokenize_text, text) for text in all_texts]
+        with ThreadPoolExecutor(max_workers=5) as executor:  # Adjust workers as needed
+            futures = [
+                executor.submit(self._tokenize_text, text) for text in all_texts
+            ]
             for future in as_completed(futures):
                 try:
                     tokens = future.result()
                     self.buffer.extend(tokens + [self.tokenizer.eos_token_id])
-                    if len(self.buffer) > self.max_buffer_size:
-                        self.buffer = self.buffer[-self.max_buffer_size:]
                 except Exception as e:
                     bt.logging.error(f"Error during tokenization: {e}")
 
