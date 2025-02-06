@@ -64,7 +64,7 @@ class DataLoader(IterableDataset):
         iterations = math.ceil(length / 100)
         all_texts = []  # To store all texts fetched from HTTP requests
 
-        # Step 1: Fetch all data in parallel
+        bt.logging.info(f"Itterations {iterations}")
         start_time = time.time()
         with ThreadPoolExecutor(max_workers=5) as executor:  # Adjust workers as needed
             futures = []
