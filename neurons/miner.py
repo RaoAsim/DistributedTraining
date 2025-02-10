@@ -487,11 +487,11 @@ class Miner(BaseMinerNeuron):
         start_time: float = time.perf_counter()
         responded_success, elapsed_time = await self.fetch_dataset_response()
         if responded_success and elapsed_time > 4.4:
-            self.config.neuron.training_examples_per_miner = 650
+            self.config.neuron.training_examples_per_miner = 750
         elif responded_success:
-            self.config.neuron.training_examples_per_miner = 800
+            self.config.neuron.training_examples_per_miner = 1000
         else:
-            self.config.neuron.training_examples_per_miner = 400
+            self.config.neuron.training_examples_per_miner = 500
 
         bt.logging.info(f"Training Size: {self.config.neuron.training_examples_per_miner}.")
         self.global_progress.epoch = get_global_epoch(self)
