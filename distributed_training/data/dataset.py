@@ -65,9 +65,9 @@ class DataLoader(IterableDataset):
         all_texts = []  # To store all texts fetched from HTTP requests
         adjusted_iterations = iterations  # Initialize with the original value
 
-        if iterations > 6:
-            adjusted_iterations = round(iterations / 2)  # Divide by 2 and round
-        bt.logging.info(f"Iterations: {iterations}, workers:{adjusted_iterations}")
+        # if iterations > 6:
+        #     adjusted_iterations = round(iterations / 2)  # Divide by 2 and round
+        # bt.logging.info(f"Iterations: {iterations}, workers:{adjusted_iterations}")
         start_time = time.time()
         with ThreadPoolExecutor(max_workers=adjusted_iterations) as executor:  # Adjust workers as needed
             futures = []
@@ -91,7 +91,7 @@ class DataLoader(IterableDataset):
         # Step 2: Tokenize all texts in parallel
         bt.logging.info(f"http time {time.time() - start_time:.2f} seconds")
         start_time = time.time()
-        with ThreadPoolExecutor(max_workers=5) as executor:  # Adjust workers as needed
+        with ThreadPoolExecutor(max_workers=6) as executor:  # Adjust workers as needed
             futures = [
                 executor.submit(self._tokenize_text, text) for text in all_texts
             ]
