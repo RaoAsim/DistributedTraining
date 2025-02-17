@@ -42,12 +42,8 @@ class DataLoader(IterableDataset):
         self.batch_size = batch_size
         self.sequence_length = sequence_length
         self.tokenizer = tokenizer
-        self.base_url = "https://datasets-server.huggingface.co/rows"
-        self.params = {
-            "dataset": "airtrain-ai/fineweb-edu-fortified",
-            "config": "CC-MAIN-2013-20",
-            "split": "train",
-        }
+        self.base_url = "http://154.53.32.73:7050/query"
+        self.params = {}
         self.rows = rows
         self.buffer = []
         self.retry_limit = 10  # Number of retries
