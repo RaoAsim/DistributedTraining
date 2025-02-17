@@ -25,7 +25,7 @@ import requests
 import torch
 from torch.utils.data import IterableDataset
 from transformers import AutoTokenizer
-
+import orjson
 model_name = "distilgpt2"
 tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
 tokenizer.pad_token = tokenizer.eos_token
@@ -68,30 +68,32 @@ class DataLoader(IterableDataset):
         # if iterations > 6:
         #     adjusted_iterations = round(iterations / 2)  # Divide by 2 and round
         # bt.logging.info(f"Iterations: {iterations}, workers:{adjusted_iterations}")
+       
         start_time = time.time()
-        with ThreadPoolExecutor(max_workers=adjusted_iterations) as executor:  # Adjust workers as needed
-            futures = []
-            for iteration in range(iterations):
-                iter_offset = offset + (iteration * 100)
-                iter_length = min(100, length - (iteration * 100))
+        all_texts=await self._fetch_data(offset, length)
+        # with ThreadPoolExecutor(max_workers=adjusted_iterations) as executor:  # Adjust workers as needed
+        #     futures = []
+        #     for iteration in range(iterations):
+        #         iter_offset = offset + (iteration * 100)
+        #         iter_length = min(100, length - (iteration * 100))
 
-                # Submit tasks for parallel execution
-                futures.append(
-                    executor.submit(self._fetch_data, iter_offset, iter_length)
-                )
+        #         # Submit tasks for parallel execution
+        #         futures.append(
+        #             executor.submit(self._fetch_data, iter_offset, iter_length)
+        #         )
 
-            # Collect all texts from the responses
-            for future in as_completed(futures):
-                try:
-                    texts = future.result()
-                    all_texts.extend(texts)
-                except Exception as e:
-                    bt.logging.error(f"Error during data fetch: {e}")
+        #     # Collect all texts from the responses
+        #     for future in as_completed(futures):
+        #         try:
+        #             texts = future.result()
+        #             all_texts.extend(texts)
+        #         except Exception as e:
+        #             bt.logging.error(f"Error during data fetch: {e}")
 
         # Step 2: Tokenize all texts in parallel
         bt.logging.info(f"http time {time.time() - start_time:.2f} seconds")
         start_time = time.time()
-        with ThreadPoolExecutor(max_workers=6) as executor:  # Adjust workers as needed
+        with ThreadPoolExecutor(max_workers=5) as executor:  # Adjust workers as needed
             futures = [
                 executor.submit(self._tokenize_text, text) for text in all_texts
             ]
@@ -113,7 +115,8 @@ class DataLoader(IterableDataset):
                 params.update({"offset": offset, "length": length})
                 response = requests.get(self.base_url, params=params)
                 response.raise_for_status()
-                texts=[row["row"]["text"] for row in response.json()["rows"]]
+                data = orjson.loads(response.content)
+                texts = [row["text"] for row in data] 
                 return texts
 
             except requests.exceptions.RequestException as e:
