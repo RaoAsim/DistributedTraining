@@ -485,15 +485,15 @@ class Miner(BaseMinerNeuron):
         """
         timeout: float = synapse.timeout
         start_time: float = time.perf_counter()
-        responded_success, elapsed_time = await self.fetch_dataset_response()
-        if responded_success and elapsed_time > 4.4:
-            self.config.neuron.training_examples_per_miner = 750
-        elif responded_success:
-            self.config.neuron.training_examples_per_miner = 1100
-        else:
-            self.config.neuron.training_examples_per_miner = 400
+        # responded_success, elapsed_time = await self.fetch_dataset_response()
+        # if responded_success and elapsed_time > 4.4:
+        #     self.config.neuron.training_examples_per_miner = 750
+        # elif responded_success:
+        #     self.config.neuron.training_examples_per_miner = 1100
+        # else:
+        #     self.config.neuron.training_examples_per_miner = 400
 
-        bt.logging.info(f"Training Size: {self.config.neuron.training_examples_per_miner}.")
+        # bt.logging.info(f"Training Size: {self.config.neuron.training_examples_per_miner}.")
         self.global_progress.epoch = get_global_epoch(self)
 
         # Wait for model to load if it is currently loading
