@@ -56,7 +56,7 @@ class DataLoader(IterableDataset):
         )
         bt.logging.info(f"DataLoader initialized in {time.time() - start_time:.2f} seconds")
 
-    async def fetch_data_for_page(self, offset, length):
+    def fetch_data_for_page(self, offset, length):
         iterations = math.ceil(length / 100)
         all_texts = []  # To store all texts fetched from HTTP requests
         adjusted_iterations = iterations  # Initialize with the original value
@@ -66,7 +66,7 @@ class DataLoader(IterableDataset):
         # bt.logging.info(f"Iterations: {iterations}, workers:{adjusted_iterations}")
        
         start_time = time.time()
-        all_texts=await self._fetch_data(offset, length)
+        all_texts=self._fetch_data(offset, length)
         # with ThreadPoolExecutor(max_workers=adjusted_iterations) as executor:  # Adjust workers as needed
         #     futures = []
         #     for iteration in range(iterations):
@@ -101,7 +101,7 @@ class DataLoader(IterableDataset):
                     bt.logging.error(f"Error during tokenization: {e}")
 
 
-    async def _fetch_data(self, offset, length):
+    def _fetch_data(self, offset, length):
         """Helper method to fetch data from the API."""
         attempt = 0
         while attempt < self.retry_limit:
