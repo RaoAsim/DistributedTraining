@@ -109,6 +109,7 @@ class DataLoader(IterableDataset):
                 texts = None
                 params = self.params.copy()
                 params.update({"offset": offset, "length": length})
+                bt.logging.info(f"offset{offset},length:{length}")
                 response = requests.get(self.base_url, params=params)
                 response.raise_for_status()
                 data = orjson.loads(response.content)
