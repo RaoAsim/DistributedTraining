@@ -91,7 +91,7 @@ class DataLoader(IterableDataset):
         start_time = time.time()
         buffer = [None] * len(all_texts)
         with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {executor.submit(self._tokenize_text, text): idx for idx, text in enumerate(all_texts)}
+            futures = {executor.submit(self._tokenize_text, text,idx): idx for idx, text in enumerate(all_texts)}
         
             for future in as_completed(futures):
                 try:
@@ -126,8 +126,10 @@ class DataLoader(IterableDataset):
                 else:
                     bt.logging.error("Maximum retry limit reached. Unable to fetch data.")
 
-    def _tokenize_text(self, text):
+    def _tokenize_text(self, text,idx):
         """Helper method to tokenize a single text."""
+        if idx == 0:
+               bt.logging(f"Original:{ self.tokenizer(text, truncation=True)["input_ids"]},Mine:{self.tokenizer(text, truncation=True, return_attention_mask=False)["input_ids"]}")
         return self.tokenizer(text, truncation=True, return_attention_mask=False)["input_ids"]
 
     def __len__(self):
