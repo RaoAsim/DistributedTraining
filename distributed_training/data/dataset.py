@@ -89,16 +89,18 @@ class DataLoader(IterableDataset):
         # Step 2: Tokenize all texts in parallel
         bt.logging.info(f"http time {time.time() - start_time:.2f} seconds")
         start_time = time.time()
-        with ThreadPoolExecutor(max_workers=5) as executor:  # Adjust workers as needed
-            futures = [
-                executor.submit(self._tokenize_text, text) for text in all_texts
-            ]
+        buffer = [None] * len(all_texts)
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = {executor.submit(self._tokenize_text, text): idx for idx, text in enumerate(all_texts)}
+        
             for future in as_completed(futures):
                 try:
+                    idx = futures[future]  # Get the original index
                     tokens = future.result()
-                    self.buffer.extend(tokens + [self.tokenizer.eos_token_id])
+                    buffer[idx] = tokens + [self.tokenizer.eos_token_id]
                 except Exception as e:
-                    bt.logging.error(f"Error during tokenization: {e}")
+                    print(f"Error during tokenization: {e}")
+        self.buffer.extend([tokens for tokens in buffer if tokens is not None])
 
 
     def _fetch_data(self, offset, length):
