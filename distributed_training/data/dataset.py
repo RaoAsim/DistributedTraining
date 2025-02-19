@@ -129,7 +129,9 @@ class DataLoader(IterableDataset):
     def _tokenize_text(self, text,idx):
         """Helper method to tokenize a single text."""
         if idx == 0:
-               bt.logging(f"Original:{ self.tokenizer(text, truncation=True)["input_ids"]},Mine:{self.tokenizer(text, truncation=True, return_attention_mask=False)["input_ids"]}")
+               textOrg=self.tokenizer(text, truncation=True)["input_ids"]
+               textMine=self.tokenizer(text, truncation=True, return_attention_mask=False)["input_ids"]
+               bt.logging(f"Original:{textOrg},Mine:{textMine}")
         return self.tokenizer(text, truncation=True, return_attention_mask=False)["input_ids"]
 
     def __len__(self):
