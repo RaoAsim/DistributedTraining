@@ -92,17 +92,15 @@ class DataLoader(IterableDataset):
         buffer = [None] * len(all_texts)
         with ThreadPoolExecutor(max_workers=5) as executor:
             futures = {executor.submit(self._tokenize_text, text,idx): idx for idx, text in enumerate(all_texts)}
-        
             for future in as_completed(futures):
                 try:
                     idx = futures[future]  # Get the original index
                     tokens = future.result()
                     buffer[idx] = tokens + [self.tokenizer.eos_token_id]
                 except Exception as e:
-                    print(f"Error during tokenization: {e}")
-        self.buffer.extend([tokens for tokens in buffer if tokens is not None])
-
-
+                    bt.logging.error(f"Error during tokenization: {e}")
+        self.buffer.extend(token for tokens in buffer if tokens is not None for token in tokens)
+        
     def _fetch_data(self, offset, length):
         """Helper method to fetch data from the API."""
         attempt = 0
