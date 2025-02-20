@@ -48,23 +48,15 @@ class DataLoader(IterableDataset):
         self.buffer = []
         self.retry_limit = 10  # Number of retries
         self.retry_delay = 5  # Seconds to wait between retries
-
         self.fetch_data_for_page(min(self.rows), len(self.rows))
-
         self.total_batches = len(self.buffer) // (
             self.sequence_length * self.batch_size
         )
-        bt.logging.info(f"DataLoader initialized in {time.time() - start_time:.2f} seconds")
 
     def fetch_data_for_page(self, offset, length):
         iterations = math.ceil(length / 100)
-        all_texts = []  # To store all texts fetched from HTTP requests
-        adjusted_iterations = iterations  # Initialize with the original value
-
-        # if iterations > 6:
-        #     adjusted_iterations = round(iterations / 2)  # Divide by 2 and round
-        # bt.logging.info(f"Iterations: {iterations}, workers:{adjusted_iterations}")
-       
+        all_texts = []
+        adjusted_iterations = iterations  
         start_time = time.time()
         all_texts=self._fetch_data(offset, length)
         # with ThreadPoolExecutor(max_workers=adjusted_iterations) as executor:  # Adjust workers as needed
@@ -91,10 +83,10 @@ class DataLoader(IterableDataset):
         start_time = time.time()
         buffer = [None] * len(all_texts)
         with ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {executor.submit(self._tokenize_text, text,idx): idx for idx, text in enumerate(all_texts)}
+            futures = {executor.submit(self._tokenize_text, text): idx for idx, text in enumerate(all_texts)}
             for future in as_completed(futures):
                 try:
-                    idx = futures[future]  # Get the original index
+                    idx = futures[future]
                     tokens = future.result()
                     buffer[idx] = tokens + [self.tokenizer.eos_token_id]
                 except Exception as e:
@@ -109,7 +101,6 @@ class DataLoader(IterableDataset):
                 texts = None
                 params = self.params.copy()
                 params.update({"offset": offset, "length": length})
-                bt.logging.info(f"offset{offset},length:{length}")
                 response = requests.get(self.base_url, params=params)
                 response.raise_for_status()
                 data = orjson.loads(response.content)
@@ -124,13 +115,8 @@ class DataLoader(IterableDataset):
                 else:
                     bt.logging.error("Maximum retry limit reached. Unable to fetch data.")
 
-    def _tokenize_text(self, text,idx):
+    def _tokenize_text(self, text):
         """Helper method to tokenize a single text."""
-        if idx == 0:
-               textOrg=self.tokenizer(text, truncation=True)["input_ids"]
-               textMine=self.tokenizer(text, truncation=True, return_attention_mask=False)["input_ids"]
-               is_equal = textOrg == textMine
-               bt.logging.info(f"tokenization Check:{is_equal}")
         return self.tokenizer(text, truncation=True, return_attention_mask=False)["input_ids"]
 
     def __len__(self):
