@@ -131,7 +131,7 @@ class DataLoader(IterableDataset):
         if idx == 0:
                textOrg=self.tokenizer(text, truncation=True)["input_ids"]
                textMine=self.tokenizer(text, truncation=True, return_attention_mask=False)["input_ids"]
-               bt.logging.info(f"Original:{textOrg},Mine:{textMine}")
+               bt.logging.info(f"tokenization Check:{textOrg===textMine}")
         return self.tokenizer(text, truncation=True, return_attention_mask=False)["input_ids"]
 
     def __len__(self):
