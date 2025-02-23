@@ -82,7 +82,7 @@ class DataLoader(IterableDataset):
         bt.logging.info(f"http time {time.time() - start_time:.2f} seconds")
         start_time = time.time()
         buffer = [None] * len(all_texts)
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        with ThreadPoolExecutor(max_workers=4) as executor:
             futures = {executor.submit(self._tokenize_text, text): idx for idx, text in enumerate(all_texts)}
             for future in as_completed(futures):
                 try:
