@@ -117,7 +117,7 @@ class DataLoader(IterableDataset):
 
     def _tokenize_text(self, text):
         """Helper method to tokenize a single text."""
-        return self.tokenizer(text, truncation=True, return_attention_mask=False)["input_ids"]
+        return self.tokenizer(text, truncation=True)["input_ids"]
 
     def __len__(self):
         return self.total_batches
