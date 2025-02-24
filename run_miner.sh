@@ -19,19 +19,19 @@ while [[ $# -gt 0 ]]; do
   if [[ "$arg" == -* ]]; then
     if [[ $# -gt 1 && "$2" != -* ]]; then
       if [[ "$arg" == "--script" ]]; then
-        script="$2"
+        script="$2";
         shift 2
       else
-        args+=("'$arg'")
-        args+=("'$2'")
+        args+=("'$arg'");
+        args+=("'$2'");
         shift 2
       fi
     else
-      args+=("'$arg'")
+      args+=("'$arg'");
       shift
     fi
   else
-    args+=("'$arg '")
+    args+=("'$arg '");
     shift
   fi
 done
