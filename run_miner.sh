@@ -3,6 +3,7 @@
 script="neurons/miner.py"
 proc_name="distributed_training_miner" 
 args=()
+old_args=$@
 
 # Check if pm2 is installed
 if ! command -v pm2 &> /dev/null
@@ -35,6 +36,12 @@ while [[ $# -gt 0 ]]; do
   fi
 done
 
+# Ensure only one instance is running
+if pm2 status | grep -q $proc_name; then
+    echo "The script is already running. Exiting..."
+    pm2 delete $proc_name
+fi
+
 echo "Running $script with the following pm2 config:"
 
 joined_args=$(printf "%s," "${args[@]}")
@@ -46,12 +53,10 @@ echo "module.exports = {
     script : '$script',
     interpreter: 'python3',
     min_uptime: '5m',
-    max_restarts: 5,
+    max_restarts: '5',
     args: [$joined_args]
   }]
 }" > app.config.js
 
 cat app.config.js
-
-# Start the miner process
-pm2 start app.config.js --update-env
+pm2 start app.config.js
