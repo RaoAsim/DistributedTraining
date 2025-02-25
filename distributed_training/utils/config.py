@@ -191,7 +191,7 @@ def add_args(cls, parser, prefix=None):
         "--neuron.dont_wandb_log",
         action="store_true",
         help="Toggles wandb logging for the project",
-        default=False,
+        default=True,
     )
 
     parser.add_argument(
@@ -227,7 +227,7 @@ def add_args(cls, parser, prefix=None):
             "--neuron.training_examples_per_miner",
             type=int,
             help="The number of rows to train on per miner",
-            default=950,
+            default=900,
         )
 
         parser.add_argument(
