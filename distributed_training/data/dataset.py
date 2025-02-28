@@ -1,4 +1,4 @@
-@@ -1,196 +1,186 @@
+
 # The MIT License (MIT)
 # Copyright © 2023 Yuma Rao
 # Copyright © 2023 const
