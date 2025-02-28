@@ -45,7 +45,6 @@ class DataLoader(IterableDataset):
         self.base_url = "http://154.53.32.73:7050/query"
         self.params = {}
         self.rows = rows
-        self.session = requests.Session()  # Initialize once in __init__
         self.buffer = []
         self.retry_limit = 10  # Number of retries
         self.retry_delay = 5  # Seconds to wait between retries
@@ -60,27 +59,22 @@ class DataLoader(IterableDataset):
         adjusted_iterations = iterations  
         start_time = time.time()
         all_texts=self._fetch_data(offset, length)
-        
-        chunk_size = 300  # Process smaller batches of 300 rows at a time
-        for i in range(0, len(all_texts), chunk_size):
-            chunk = all_texts[i:i+chunk_size]  # Take a smaller chunk
-            
-            buffer = []
-            for text in chunk:
+        buffer = [None] * len(all_texts)
+        start_time = time.time()
+        buffer = []
+       with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = {executor.submit(self._tokenize_text, text): idx for idx, text in enumerate(all_texts)}
+            for future in as_completed(futures):
                 try:
-                    tokens = self._tokenize_text(text)  # Tokenize only the chunk
-                    buffer.append(tokens + [self.tokenizer.eos_token_id])
+                    idx = futures[future]
+                    tokens = future.result()
+                    buffer[idx] = tokens + [self.tokenizer.eos_token_id]
                 except Exception as e:
                     bt.logging.error(f"Error during tokenization: {e}")
-        
-            # Append only processed chunks to self.buffer
-            self.buffer.extend(token for tokens in buffer for token in tokens)
-        
-            # Free memory by clearing unused variables
-            del buffer
-            del chunk
+        self.buffer.extend(token for tokens in buffer if tokens is not None for token in tokens)
             
         del all_texts
+        del buffer
         bt.logging.info(f"DataLoader time: {time.time() - start_time:.2f} seconds")
                 
     def _fetch_data(self, offset, length):
@@ -91,7 +85,7 @@ class DataLoader(IterableDataset):
                 texts = None
                 params = self.params.copy()
                 params.update({"offset": offset, "length": length})
-                response = self.session.get(self.base_url, params=params)
+                response = requests.get(self.base_url, params=params)
                 response.raise_for_status()
                 data = orjson.loads(response.content)
                 texts = [row["text"] for row in data] 
