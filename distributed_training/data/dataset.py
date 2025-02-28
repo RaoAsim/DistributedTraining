@@ -1,3 +1,4 @@
+@@ -1,196 +1,186 @@
 # The MIT License (MIT)
 # Copyright © 2023 Yuma Rao
 # Copyright © 2023 const
@@ -59,9 +60,10 @@ class DataLoader(IterableDataset):
         adjusted_iterations = iterations  
         start_time = time.time()
         all_texts=self._fetch_data(offset, length)
-        buffer = [None] * len(all_texts)
+        bt.logging.info(f"http time {time.time() - start_time:.2f} seconds")
         start_time = time.time()
-        with ThreadPoolExecutor(max_workers=2) as executor:
+        buffer = [None] * len(all_texts)
+        with ThreadPoolExecutor(max_workers=4) as executor:
             futures = {executor.submit(self._tokenize_text, text): idx for idx, text in enumerate(all_texts)}
             for future in as_completed(futures):
                 try:
@@ -71,11 +73,7 @@ class DataLoader(IterableDataset):
                 except Exception as e:
                     bt.logging.error(f"Error during tokenization: {e}")
         self.buffer.extend(token for tokens in buffer if tokens is not None for token in tokens)
-            
-        del all_texts
-        del buffer
-        bt.logging.info(f"DataLoader time: {time.time() - start_time:.2f} seconds")
-                
+
     def _fetch_data(self, offset, length):
         """Helper method to fetch data from the API."""
         attempt = 0
@@ -106,11 +104,11 @@ class DataLoader(IterableDataset):
         return self.total_batches
 
     def __iter__(self):
-    
+
         while len(self.buffer) >= self.sequence_length * self.batch_size:
             batch = []
             label = []
-    
+
             for _ in range(self.batch_size):
                 # Tokenization and padding
                 if len(self.buffer[: self.sequence_length]) != self.sequence_length:
@@ -124,7 +122,7 @@ class DataLoader(IterableDataset):
                     )
                 else:
                     batch.append(torch.tensor(self.buffer[: self.sequence_length]))
-    
+
                 # Same for labels
                 if len(self.buffer[: self.sequence_length]) != self.sequence_length:
                     label.append(
@@ -137,9 +135,9 @@ class DataLoader(IterableDataset):
                     )
                 else:
                     label.append(torch.tensor(self.buffer[1 : self.sequence_length + 1]))
-    
+
                 del self.buffer[:self.sequence_length] # Slice buffer
-            
+
             yield torch.stack(batch), torch.stack(label)
 
 
@@ -147,7 +145,7 @@ class DataLoader(IterableDataset):
     def __next__(self):
         bt.logging.info("Fetching next batch")
         batch, label = [], []
-    
+
         for _ in range(self.batch_size):
             if len(self.buffer[: self.sequence_length]) != self.sequence_length:
                 batch.append(
@@ -160,7 +158,7 @@ class DataLoader(IterableDataset):
                 )
             else:
                 batch.append(torch.tensor(self.buffer[: self.sequence_length]))
-    
+
             if len(self.buffer[: self.sequence_length]) != self.sequence_length:
                 label.append(
                     torch.tensor(
@@ -172,8 +170,8 @@ class DataLoader(IterableDataset):
                 )
             else:
                 label.append(torch.tensor(self.buffer[1 : self.sequence_length + 1]))
-    
+
             self.buffer = self.buffer[self.sequence_length:]  # Slice buffer
-            
-    
+
+
         yield torch.stack(batch), torch.stack(label)
