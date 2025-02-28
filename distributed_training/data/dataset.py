@@ -62,7 +62,7 @@ class DataLoader(IterableDataset):
         buffer = [None] * len(all_texts)
         start_time = time.time()
         buffer = []
-       with ThreadPoolExecutor(max_workers=2) as executor:
+        with ThreadPoolExecutor(max_workers=2) as executor:
             futures = {executor.submit(self._tokenize_text, text): idx for idx, text in enumerate(all_texts)}
             for future in as_completed(futures):
                 try:
