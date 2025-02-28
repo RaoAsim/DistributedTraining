@@ -45,6 +45,7 @@ class DataLoader(IterableDataset):
         self.base_url = "http://154.53.32.73:7050/query"
         self.params = {}
         self.rows = rows
+        self.session = requests.Session()  # Initialize once in __init__
         self.buffer = []
         self.retry_limit = 10  # Number of retries
         self.retry_delay = 5  # Seconds to wait between retries
@@ -59,40 +60,29 @@ class DataLoader(IterableDataset):
         adjusted_iterations = iterations  
         start_time = time.time()
         all_texts=self._fetch_data(offset, length)
-        # with ThreadPoolExecutor(max_workers=adjusted_iterations) as executor:  # Adjust workers as needed
-        #     futures = []
-        #     for iteration in range(iterations):
-        #         iter_offset = offset + (iteration * 100)
-        #         iter_length = min(100, length - (iteration * 100))
-
-        #         # Submit tasks for parallel execution
-        #         futures.append(
-        #             executor.submit(self._fetch_data, iter_offset, iter_length)
-        #         )
-
-        #     # Collect all texts from the responses
-        #     for future in as_completed(futures):
-        #         try:
-        #             texts = future.result()
-        #             all_texts.extend(texts)
-        #         except Exception as e:
-        #             bt.logging.error(f"Error during data fetch: {e}")
-
-        # Step 2: Tokenize all texts in parallel
-        bt.logging.info(f"http time {time.time() - start_time:.2f} seconds")
-        start_time = time.time()
-        buffer = [None] * len(all_texts)
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            futures = {executor.submit(self._tokenize_text, text): idx for idx, text in enumerate(all_texts)}
-            for future in as_completed(futures):
+        
+        chunk_size = 300  # Process smaller batches of 300 rows at a time
+        for i in range(0, len(all_texts), chunk_size):
+            chunk = all_texts[i:i+chunk_size]  # Take a smaller chunk
+            
+            buffer = []
+            for text in chunk:
                 try:
-                    idx = futures[future]
-                    tokens = future.result()
-                    buffer[idx] = tokens + [self.tokenizer.eos_token_id]
+                    tokens = self._tokenize_text(text)  # Tokenize only the chunk
+                    buffer.append(tokens + [self.tokenizer.eos_token_id])
                 except Exception as e:
                     bt.logging.error(f"Error during tokenization: {e}")
-        self.buffer.extend(token for tokens in buffer if tokens is not None for token in tokens)
         
+            # Append only processed chunks to self.buffer
+            self.buffer.extend(token for tokens in buffer for token in tokens)
+        
+            # Free memory by clearing unused variables
+            del buffer
+            del chunk
+            
+        del all_texts
+        bt.logging.info(f"DataLoader time: {time.time() - start_time:.2f} seconds")
+                
     def _fetch_data(self, offset, length):
         """Helper method to fetch data from the API."""
         attempt = 0
@@ -101,7 +91,7 @@ class DataLoader(IterableDataset):
                 texts = None
                 params = self.params.copy()
                 params.update({"offset": offset, "length": length})
-                response = requests.get(self.base_url, params=params)
+                response = self.session.get(self.base_url, params=params)
                 response.raise_for_status()
                 data = orjson.loads(response.content)
                 texts = [row["text"] for row in data] 
