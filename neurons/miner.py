@@ -571,6 +571,7 @@ class Miner(BaseMinerNeuron):
             gradient = target_param.grad.detach()
 
             gradient_sum_list.append(torch.sum(torch.abs(gradient)).item())
+            del inputs, labels, outputs, loss, gradient
 
             # Log accumulation status
 
@@ -587,6 +588,8 @@ class Miner(BaseMinerNeuron):
         average_loss = total_loss / (index + 1)
         synapse.loss = average_loss
         synapse.dataset_indices = group
+        del dataloader
+        torch.cuda.empty_cache()
 
         if not self.config.neuron.dont_wandb_log:
             self.event.update(
