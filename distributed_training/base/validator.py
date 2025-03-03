@@ -166,7 +166,7 @@ class BaseValidatorNeuron(BaseNeuron):
                     self.wandb.log(self.event)
 
                 self.step += 1
-                if self.peer_id_logged_to_chain == False:
+                if self.peer_id_logged_to_chain is False:
                     log_peerid_to_chain(self)
 
         # If someone intentionally stops the validator, it'll safely terminate operations.
@@ -328,6 +328,7 @@ class BaseValidatorNeuron(BaseNeuron):
         for uid, hotkey in enumerate(self.hotkeys):
             if hotkey != self.metagraph.hotkeys[uid]:
                 self.scores[uid] = 0  # hotkey has been replaced
+                self.uid_tracker[uid] = 0
 
         # Check to see if the metagraph has changed size.
         # If so, we need to add new hotkeys and moving averages.
@@ -337,6 +338,7 @@ class BaseValidatorNeuron(BaseNeuron):
             min_len = min(len(self.hotkeys), len(self.scores))
             new_moving_average[:min_len] = self.scores[:min_len]
             self.scores = new_moving_average
+            self.uid_tracker[uid] = self.uid_tracker_initial_state
 
         # Update the hotkeys.
         self.hotkeys = copy.deepcopy(self.metagraph.hotkeys)
@@ -406,6 +408,7 @@ class BaseValidatorNeuron(BaseNeuron):
             scores=self.scores,
             hotkeys=self.hotkeys,
             failed_is_alive_counter=self.failed_is_alive_counter,
+            uid_tracker=self.uid_tracker,
         )
 
     def load_state(self):
@@ -428,6 +431,14 @@ class BaseValidatorNeuron(BaseNeuron):
                 self.failed_is_alive_counter = state[
                     "failed_is_alive_counter"
                 ].flatten()[0]
+            if "uid_tracker" in state:
+                self.uid_tracker = state["uid_tracker"].flatten()[0]
+                for uid in self.uid_tracker:
+                    if (
+                        self.uid_tracker[uid].keys()
+                        != self.uid_tracker_initial_state.keys()
+                    ):
+                        self.uid_tracker[uid] = self.uid_tracker_initial_state.copy()
 
         elif os.path.isfile(self.config.neuron.full_path + "/state.pt"):
             bt.logging.info(
