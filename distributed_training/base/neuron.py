@@ -111,6 +111,9 @@ class BaseNeuron(ABC):
             "train_number_of_blocks": 0,
             "train_duration": 0,
             "train_score": 0,
+            "repo_valid_sum": 0,
+            "repo_valid_count": 0,
+            "repo_valid_score": 0,
             "all_reduce_successes": 0,
             "all_reduce_counts": 0,
             "all_reduce_score": 0,
@@ -122,6 +125,8 @@ class BaseNeuron(ABC):
         }
         self.allreduce_timeout = 540
         self.upload_state_duration = 150
+        self.all_reduce_success_status = True
+        self.should_all_reduce = False
 
     # @abstractmethod # miner is not using this anymore
     async def forward(self, synapse: bt.Synapse) -> bt.Synapse:
