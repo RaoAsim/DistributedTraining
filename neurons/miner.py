@@ -283,7 +283,9 @@ class Miner(BaseMinerNeuron):
                         f":memory: Saving model state locally for epoch {epoch}"
                     )
                     self.model.config.inner_step = self.local_progress.inner_step
-                    self.model.save_pretrained(tmp_folder)
+                    self.model.save_pretrained(tmp_folder, low_cpu_mem_usage=True)
+                    gc.collect()
+
 
                     bt.logging.info(
                         f":upload: Uploading model and optimizer states to repo: {self.config.neuron.local_model_name}"
