@@ -210,7 +210,7 @@ def add_args(cls, parser, prefix=None):
         "--neuron.dont_wandb_log",
         action="store_true",
         help="Toggles wandb logging for the project",
-        default=False,
+        default=True,
     )
 
     parser.add_argument(
