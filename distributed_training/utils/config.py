@@ -306,8 +306,8 @@ def add_args(cls, parser, prefix=None):
             "--neuron.local_model_name",
             type=str,
             help="The model to be trained",
-            default="asim22/DistributedTraining_subnet38",
-            required=False,
+            default=None,
+            required=True,
         )
 
         parser.add_argument(
