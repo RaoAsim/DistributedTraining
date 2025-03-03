@@ -283,7 +283,7 @@ class Miner(BaseMinerNeuron):
                         f":memory: Saving model state locally for epoch {epoch}"
                     )
                     self.model.config.inner_step = self.local_progress.inner_step
-                    self.model.save_pretrained(tmp_folder, low_cpu_mem_usage=True)
+                    self.model.save_pretrained(tmp_folder, low_cpu_mem_usage=True, max_memory="auto")
                     gc.collect()
 
 
