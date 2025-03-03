@@ -124,7 +124,7 @@ def add_args(cls, parser, prefix=None):
         "--neuron.epoch_length",
         type=int,
         help="The default epoch length (how often we set weights, measured in 12 second blocks).",
-        default=100,
+        default=160,
     )
 
     parser.add_argument(
@@ -140,7 +140,7 @@ def add_args(cls, parser, prefix=None):
         nargs="+",
         help="The addresses for the DHT",
         default=[
-            "/ip4/161.97.156.125/tcp/8000/p2p/12D3KooWECM2JXC8qYyP74vxaEjhwCto4jarQDDw5hKTvCVNVAms",
+            "/ip4/161.97.156.125/tcp/8000/p2p/12D3KooWLiyHyX4SX7KP2bWrm24wg7AgMn5uPGotEKNpk8JxMNMR",
         ],
     )
     parser.add_argument(
@@ -189,7 +189,7 @@ def add_args(cls, parser, prefix=None):
         "--neuron.target_n_blocks",
         type=int,
         help="The hivemind global target_batch_size",
-        default=25,
+        default=5,
     )
 
     parser.add_argument(
@@ -210,7 +210,7 @@ def add_args(cls, parser, prefix=None):
         "--neuron.dont_wandb_log",
         action="store_true",
         help="Toggles wandb logging for the project",
-        default=True,
+        default=False,
     )
 
     parser.add_argument(
@@ -281,7 +281,7 @@ def add_args(cls, parser, prefix=None):
             "--neuron.moving_average_alpha",
             type=float,
             help="Moving average alpha parameter, how much to add of the new observation.",
-            default=0.05,
+            default=0.6,
         )
 
         parser.add_argument(

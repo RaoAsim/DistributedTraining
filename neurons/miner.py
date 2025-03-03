@@ -200,12 +200,6 @@ class Miner(BaseMinerNeuron):
 
         # Sync and initialize handlers
         self._sync_with_global_model()
-        self.avg_handler = AveragingHandler(
-            self.model,
-            self.inner_optimizer,
-            self.grad_averager,
-            self.state_averager,
-        )
 
     def _setup_training_params(self):
         self.local_batch_size_train = self.config.neuron.local_batch_size_train
@@ -248,7 +242,6 @@ class Miner(BaseMinerNeuron):
             )
         )
         self.model.to(self.device)
-
         if should_sync_model:
             del global_model
             gc.collect()
@@ -264,7 +257,6 @@ class Miner(BaseMinerNeuron):
 
     def upload_model(self, epoch, inner_step, batch_size):
         """Unified function to save and upload both model and optimizer state"""
-
         if not repo_exists(self.config.neuron.local_model_name, repo_type="model"):
             try:
                 create_repo(
@@ -307,14 +299,14 @@ class Miner(BaseMinerNeuron):
                         self.config.neuron.local_model_name, repo_type="model"
                     )
                     for tag in refs.tags:
-                        if int(tag.name) >= epoch:
+                        if (tag.name == "None") or (int(tag.name) >= epoch):
                             # Update tag for this version
                             delete_tag(
                                 self.config.neuron.local_model_name,
                                 repo_type="model",
                                 tag=tag.name,
                             )
-                            time.sleep(1)
+                            time.sleep(5)
                     # Create new tag for this version
                     create_tag(
                         self.config.neuron.local_model_name,
@@ -322,7 +314,6 @@ class Miner(BaseMinerNeuron):
                         tag=str(epoch),
                         tag_message=commit_message,
                     )
-
                     # Cleanup old cache
                     cleanup_old_cache(
                         self,
@@ -369,9 +360,9 @@ class Miner(BaseMinerNeuron):
         def upload_completed(future):
             try:
                 future.result()  # This will raise any exceptions that occurred
-                bt.logging.info("Validation state upload completed successfully")
+                bt.logging.info("Model state upload completed successfully")
             except Exception as e:
-                bt.logging.error(f"Validation state upload failed: {str(e)}")
+                bt.logging.error(f"Model state upload failed: {str(e)}")
 
         self.current_upload_future.add_done_callback(upload_completed)
 
@@ -466,7 +457,6 @@ class Miner(BaseMinerNeuron):
                 self.model.config.block_list.append(self.current_block)
 
                 self._process_training_batch(dataset)
-
             except Exception as e:
                 bt.logging.warning(f"Training Loop Failed with error: {e}")
                 self.training_status = TrainingStatus.ERROR
@@ -575,9 +565,16 @@ class Miner(BaseMinerNeuron):
             if synapse.completion is True:
                 self.local_progress.epoch += 1
                 bt.logging.info("AllReduce Operation Finished Succesfully")
-            bt.logging.info(synapse.timeout)
-            bt.logging.info(self.upload_state_duration)
-            bt.logging.info(time.perf_counter() - start_time)
+
+            wait_time = (
+                synapse.timeout
+                + self.upload_state_duration
+                + time.perf_counter()
+                - start_time
+            )
+            bt.logging.info(
+                f"Waiting {int(wait_time)} seconds until all nodes complete the all_reduce"
+            )
 
             # Wait for the master validator to upload new global model
             while (time.perf_counter() - start_time) <= (
@@ -590,10 +587,10 @@ class Miner(BaseMinerNeuron):
                 bt.logging.info(
                     f"Global Epoch Wasn't Updated After All Reduce. Resetting To Current Global Epoch: {self.global_progress.epoch}"
                 )
-                load_state_from_peer(self, epoch=self.global_progress.epoch)
-
-            # Resume training when done
-            self.resume_training()
+                self.all_reduce_success_status = False
+            else:
+                # Resume training when done
+                self.resume_training()
 
             return synapse
 
@@ -687,7 +684,4 @@ class Miner(BaseMinerNeuron):
 
 # This is the main function, which runs the miner.
 if __name__ == "__main__":
-    with Miner() as miner:
-        while True:
-            bt.logging.info(":lightning: Miner Running..")
-            time.sleep(45)
+    Miner().run()

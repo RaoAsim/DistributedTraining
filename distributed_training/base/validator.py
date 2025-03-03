@@ -33,6 +33,13 @@ from distributed_training.utils.weight_utils import (
     convert_weights_and_uids_for_emit,
     process_weights_for_netuid,
 )
+from distributed_training.validator.reward import (
+    score_uid,
+    update_all_reduce_scores,
+    update_total_scores,
+)
+from distributed_training.utils.progress_tracker import get_global_epoch
+from distributed_training.utils.state_loader import load_state_from_peer
 
 
 class BaseValidatorNeuron(BaseNeuron):
@@ -147,6 +154,33 @@ class BaseValidatorNeuron(BaseNeuron):
                 # Init Wandb Event For Step
                 if self.event != {}:
                     self.event = {}
+
+                current_global_epoch = self.global_progress.epoch
+                self.global_progress.epoch = get_global_epoch(self)
+                if (self.local_progress.epoch != self.global_progress.epoch) or (
+                    not self.all_reduce_success_status
+                ):
+                    if self.local_progress.epoch != self.global_progress.epoch:
+                        bt.logging.info(
+                            f"Local Epoch {self.local_progress.epoch} Behind Global Epoch {self.global_progress.epoch}. Loading Latest Model State."
+                        )
+                    if not self.all_reduce_success_status:
+                        bt.logging.info(
+                            "All Reduce Failed. Loading Latest Model State."
+                        )
+                    load_state_from_peer(self, epoch=self.global_progress.epoch)
+                    # Reset all_reduce success status
+                    if not self.all_reduce_success_status:
+                        self.all_reduce_success_status = True
+                        self.last_allreduce_block = self.block
+                    # Load all_reduce scores if non_master_uid
+                    if (
+                        (self.uid != self.master_uid)
+                        and (self.global_progress.epoch != current_global_epoch)
+                        and (self.should_all_reduce)
+                    ):
+                        update_all_reduce_scores(self)
+                        update_total_scores(self)
 
                 # Run multiple forwards concurrently.
                 self.loop.run_until_complete(self.concurrent_forward())
@@ -343,8 +377,15 @@ class BaseValidatorNeuron(BaseNeuron):
         # Update the hotkeys.
         self.hotkeys = copy.deepcopy(self.metagraph.hotkeys)
 
-    def update_scores(self, rewards: np.ndarray, uids: List[int]):
+    def update_scores(self):
         """Performs exponential moving average on the scores based on the rewards received from the miners."""
+
+        #  Make sure uid_tracker is sorted by uids
+        self.uid_tracker = dict(sorted(self.uid_tracker.items()))
+        uids = list(self.uid_tracker.keys())
+        rewards = np.array(
+            [self.uid_tracker[i]["total_score"] for i in self.uid_tracker.keys()]
+        )
 
         # Check if rewards contains NaN values.
         if np.isnan(rewards).any():

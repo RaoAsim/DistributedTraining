@@ -28,11 +28,16 @@ from distributed_training.utils.progress_tracker import (
     get_global_epoch,
 )
 from distributed_training.utils.state_loader import (
-    load_state_from_peer,
     upload_new_state,
 )
 from distributed_training.utils.uids import get_hf_validation_uid, get_random_uids
-from distributed_training.validator.reward import score_uid
+from distributed_training.validator.reward import (
+    score_uid,
+    benchmark_untested_uids,
+    update_all_reduce_scores,
+    update_total_scores,
+)
+from distributed_training.utils.uids import map_uid_to_peerid
 
 
 async def forward(self):
@@ -45,25 +50,22 @@ async def forward(self):
         self (:obj:`bittensor.neuron.Neuron`): The neuron object which contains all the necessary state for the validator.
 
     """
-    self.global_progress.epoch = get_global_epoch(self)
-    if self.local_progress.epoch != self.global_progress.epoch:
-        bt.logging.info(
-            f"Local Epoch {self.local_progress.epoch} Behind Global Epoch {self.global_progress.epoch}. Loading Latest Model State."
-        )
-        load_state_from_peer(self, epoch=self.global_progress.epoch)
-
     # Evaluate wether to run an AllReduce or validate HF miner states
+    if self.step % 2 == 0:
+        map_uid_to_peerid(self)
     blocks_since_allreduce = self.current_block - self.last_allreduce_block
-    should_allreduce = blocks_since_allreduce >= self.config.neuron.blocks_per_allreduce
+    self.should_all_reduce = (
+        blocks_since_allreduce >= self.config.neuron.blocks_per_allreduce
+    )
     bt.logging.info(
-        f"Current block {self.current_block} | Blocks Since Last AllReduce: {blocks_since_allreduce} | Should AllReduce: {should_allreduce}"
+        f"Current block {self.current_block} | Blocks Since Last AllReduce: {blocks_since_allreduce} | Should AllReduce: {self.should_all_reduce}"
     )
 
     responses = [[]]
     self.miner_uids = []
     rewards = torch.tensor([])
 
-    if should_allreduce:
+    if self.should_all_reduce:
         self.event.update({"synapse_type": "all_reduce"})
 
         self.peerids_to_uids = {
@@ -92,6 +94,7 @@ async def forward(self):
             )
             time.sleep(self.allreduce_timeout + self.upload_state_duration)
             self.miner_uids = []
+            self.last_allreduce_block = self.block
             return responses
 
         self.miner_uids = np.array([n for n in range(self.metagraph.n)])
@@ -113,20 +116,15 @@ async def forward(self):
 
             if all_reduce_success_status:
                 # Reset allreduce block tracker
-                self.last_allreduce_block = self.current_block
+                self.last_allreduce_block = self.block
                 # Update state after successful allreduce
                 self.local_progress.epoch += 1
                 self.local_progress.samples_accumulated = 0
 
-                if self.uid == self.master_uid:
-                    # Upload new global state to HF
-                    upload_new_state(
-                        self, self.local_progress.epoch, results, self.current_block
-                    )
-
                 # Update scoring based on allreduce participation
                 (
                     self.allreduce_scores,
+                    self.allreduce_status_dict,
                     self.event,
                 ) = self.avg_handler.calculate_allreduce_scores(
                     participating_peers=results["participating_peers"],
@@ -138,11 +136,16 @@ async def forward(self):
                     metagraph=self.metagraph,
                 )
 
-                for uid in self.uid_tracker.keys():
-                    self.uid_tracker[uid][
-                        "all_reduce_successes"
-                    ] = self.allreduce_scores[uid]
-                    self.uid_tracker[uid]["all_reduce_counts"] += 1
+                self.model.config.all_reduce_scores = self.allreduce_status_dict
+
+                if self.uid == self.master_uid:
+                    # Upload new global state to HF
+                    upload_new_state(
+                        self, self.local_progress.epoch, results, self.current_block
+                    )
+
+                update_all_reduce_scores(self)
+                update_total_scores(self)
 
             else:
                 raise GradientAveragingError("Unsuccessful AllReduce Step")
@@ -150,13 +153,13 @@ async def forward(self):
         except Exception as e:
             bt.logging.error(f"AllReduce Failed: {e}")
             self.global_progress.epoch = get_global_epoch(self)
-            load_state_from_peer(self, epoch=self.global_progress.epoch)
+            self.all_reduce_success_status = False
             return
 
     else:
         # If running HF validation round, only call one UID each step
         self.event.update({"synapse_type": "train"})
-        # breakpoint()
+
         self.miner_uids = await get_hf_validation_uid(
             self,
         )
@@ -171,26 +174,28 @@ async def forward(self):
 
         uid = self.miner_uids[0]
 
-        rewards = await score_uid(self, uid)
+        await score_uid(self, uid)
 
-        self.event.update(
-            {
-                "uids": self.miner_uids,
-                "learning_rate": self.learning_rate,
-                "average_miner_loss": self.average_loss,
-                "local_epoch": self.local_progress.epoch,
-                "global_epoch": self.global_progress.epoch,
-                "local_samples_accumulated": self.local_progress.samples_accumulated,
-                "global_samples_accumulated": self.global_progress.samples_accumulated,
-            }
-        )
-        self.event.update(
-            {"uid_" + str(key): value for key, value in self.uid_tracker.items()}
-        )
+    self.event.update(
+        {
+            "uids": self.miner_uids,
+            "learning_rate": self.learning_rate,
+            "average_miner_loss": self.average_loss,
+            "local_epoch": self.local_progress.epoch,
+            "global_epoch": self.global_progress.epoch,
+            "local_samples_accumulated": self.local_progress.samples_accumulated,
+            "global_samples_accumulated": self.global_progress.samples_accumulated,
+        }
+    )
+    self.event.update(
+        {"uid_" + str(key): value for key, value in self.uid_tracker.items()}
+    )
+
+    # Benchmark any untested uids
+    benchmark_untested_uids(self)
 
     # Update scores
-    if len(rewards) > 0:
-        self.update_scores(rewards.detach().cpu().numpy(), self.miner_uids)
+    self.update_scores()
 
     self.event.update(self.get_validator_info())
 
