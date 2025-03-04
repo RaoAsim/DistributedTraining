@@ -175,7 +175,7 @@ def add_args(cls, parser, prefix=None):
         "--neuron.local_batch_size_train",
         type=int,
         help="The default batch size",
-        default=8,
+        default=10,
     )
 
     parser.add_argument(
@@ -196,7 +196,7 @@ def add_args(cls, parser, prefix=None):
         "--neuron.local_batch_size_train_effective",
         type=int,
         help="Amount of micro batches for gradient accumulation",
-        default=820,
+        default=1024,
     )
 
     parser.add_argument(
