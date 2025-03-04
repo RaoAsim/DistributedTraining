@@ -283,9 +283,7 @@ class Miner(BaseMinerNeuron):
                         f":memory: Saving model state locally for epoch {epoch}"
                     )
                     self.model.config.inner_step = self.local_progress.inner_step
-                    self.model.save_pretrained(tmp_folder, low_cpu_mem_usage=True, max_memory="auto")
-                    gc.collect()
-
+                    self.model.save_pretrained(tmp_folder)
 
                     bt.logging.info(
                         f":upload: Uploading model and optimizer states to repo: {self.config.neuron.local_model_name}"
@@ -400,13 +398,13 @@ class Miner(BaseMinerNeuron):
         """Pauses the continuous training loop"""
         self.training_active.clear()
         self.training_status = TrainingStatus.AVERAGING
-        bt.logging.info(":warning:  Pausing continuous training for AllReduce query")
+        bt.logging.info(":warning:  Pausing continuous training.")
 
     def resume_training(self):
         """Resumes the continuous training loop"""
         self.training_active.set()
         self.training_status = TrainingStatus.RUNNING
-        bt.logging.info(":white_heavy_check_mark: Resuming continuous training..")
+        bt.logging.info(":white_heavy_check_mark: Resuming continuous training.")
 
     async def fetch_training_data(self):
         """Async function to fetch training data"""
