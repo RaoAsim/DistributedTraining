@@ -22,11 +22,19 @@ import traceback
 
 import bittensor as bt
 
+from enum import Enum
 from distributed_training.base.neuron import BaseNeuron
 from distributed_training.utils.chain import log_peerid_to_chain
 from distributed_training.utils.misc import get_bandwidth
 from distributed_training.utils.state_loader import load_state_from_peer
 from distributed_training.utils.progress_tracker import get_global_epoch
+
+
+class TrainingStatus(Enum):
+    ERROR = "❗ | Error"
+    RUNNING = "🏋️ | Training"
+    STOPPED = "😴 | Stopped"
+    PAUSED = "🔄 | Paused"
 
 
 class BaseMinerNeuron(BaseNeuron):
@@ -157,38 +165,33 @@ class BaseMinerNeuron(BaseNeuron):
                         time.sleep(wait_time)
                         # Check if master validator has failed to all_reduce
                         self.global_progress.epoch = get_global_epoch(self)
-                        if self.local_progress.epoch != self.global_progress.epoch:
+                        if self.local_progress.epoch > self.global_progress.epoch:
                             bt.logging.info(
                                 f"Local Epoch {self.local_progress.epoch} Behind Global Epoch {self.global_progress.epoch}. Loading Latest Model State."
                             )
-                            load_state_from_peer(self, epoch=self.global_progress.epoch)
+                            load_state_from_peer(
+                                self,
+                                epoch=self.global_progress.epoch,
+                            )
                         else:
                             load_state_from_peer(
                                 self,
                                 repo_id=self.config.neuron.local_model_name,
                                 epoch=self.global_progress.epoch,
                             )
+                        self.model.config.block_list = []
                         self.resume_training()
                         self.all_reduce_success_status = True
                     else:
-                        if self.current_block % self.config.neuron.epoch_length == 0:
-                            self.global_progress.epoch = get_global_epoch(self)
-                            if self.local_progress.epoch != self.global_progress.epoch:
-                                bt.logging.info(
-                                    f"Local Epoch {self.local_progress.epoch} Behind Global Epoch {self.global_progress.epoch}. Loading Latest Model State."
-                                )
-                                self.pause_training()
-                                if self.global_progress.epoch == 0:
-                                    load_state_from_peer(
-                                        self, epoch=self.global_progress.epoch
-                                    )
-                                else:
-                                    load_state_from_peer(
-                                        self,
-                                        repo_id=self.config.neuron.local_model_name,
-                                        epoch=self.global_progress.epoch,
-                                    )
-                                self.resume_training()
+                        if (self.last_allreduce_block is not None) and (
+                            (time.perf_counter() - self.all_reduce_start_time)
+                            > (self.allreduce_timeout + self.upload_state_duration)
+                        ):
+                            self.load_state(reset_last_allreduce_block=True)
+                        elif (self.last_allreduce_block is None) and (
+                            self.current_block % self.config.neuron.epoch_length == 0
+                        ):
+                            self.load_state(reset_last_allreduce_block=False)
 
                     # Wait before checking again.
                     time.sleep(1)
@@ -200,21 +203,87 @@ class BaseMinerNeuron(BaseNeuron):
                 # Sync metagraph and potentially set weights.
                 self.sync()
                 self.step += 1
-
+        
             # Await the training task to ensure it completes before exiting
 
         # If someone intentionally stops the miner, it'll safely terminate operations.
         except KeyboardInterrupt:
             self.should_exit = True
-            self.axon.stop()
             bt.logging.success(
                 ":white_heavy_check_mark: Miner killed by keyboard interrupt."
             )
-            exit()
+
 
         # In case of unforeseen errors, the miner will log the error and continue operations.
         except Exception as e:
             bt.logging.error(traceback.format_exc())
+
+        finally:
+            # --- Correct Shutdown Logic ---
+            bt.logging.info("Initiating graceful shutdown...")
+            
+            # 1. Stop the miner's network interface
+            self.axon.stop()
+            bt.logging.info("Axon stopped.")
+
+            # 2. Signal all background threads to stop
+            self.stop_event.set()
+            bt.logging.info("Stop event set for all workers.")
+
+            # 3. Stop the asyncio event loop safely from its own thread
+            if self.training_loop.is_running():
+                bt.logging.info("Stopping asyncio event loop...")
+                self.training_loop.call_soon_threadsafe(self.training_loop.stop)
+
+            # 4. Wait for the thread pool to shut down
+            bt.logging.info("Shutting down thread pool...")
+            self.training_executor.shutdown(wait=True)
+            bt.logging.info("Thread pool shut down.")
+
+            # 5. Final cleanup if necessary (e.g., closing InfluxDB client)
+            if self.influx_client:
+                self.influx_client.close()
+                bt.logging.info("InfluxDB client closed.")
+
+            bt.logging.success("Shutdown complete. Exiting.")
+            exit()
+
+    def load_state(self, reset_last_allreduce_block=False):
+        self.global_progress.epoch = get_global_epoch(self)
+        if self.local_progress.epoch != self.global_progress.epoch:
+            bt.logging.info(
+                f"Local Epoch {self.local_progress.epoch} Behind Global Epoch {self.global_progress.epoch}. Loading Latest Model State."
+            )
+            self.pause_training()
+            # If there's an ongoing upload, check if it's done
+            while not self.data_queue.empty():
+                try:
+                    self.data_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+            bt.logging.info(":wastebasket: Cleared prefetch queue due to model re-sync.")
+            # --- END OF ADDITION ---
+            with self.block_counter_lock:
+        # Set the counter to the current block of the newly loaded model
+                self.next_block_to_fetch = self.current_block
+            bt.logging.info(f"Reset prefetch counter to start at block {self.next_block_to_fetch}.")
+            while self.current_upload_future and not self.current_upload_future.done():
+                bt.logging.info(
+                    "Previous upload still in progress. Waiting until upload is complete."
+                )
+                time.sleep(1)
+            if self.global_progress.epoch == 0:
+                load_state_from_peer(self, epoch=self.global_progress.epoch)
+            else:
+                load_state_from_peer(
+                    self,
+                    repo_id=self.config.neuron.local_model_name,
+                    epoch=self.global_progress.epoch,
+                )
+            self.model.config.block_list = []
+            self.resume_training()
+        if reset_last_allreduce_block:
+            self.last_allreduce_block = None
 
     def run_in_background_thread(self):
         """

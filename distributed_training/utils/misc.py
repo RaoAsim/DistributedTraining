@@ -38,6 +38,7 @@ from hivemind.utils.logging import use_hivemind_log_handler
 
 import wandb
 from distributed_training.protocol import AllReduce
+from distributed_training import __run__, __version__
 
 EVENTS_LEVEL_NUM = 38
 DEFAULT_LOG_BACKUP_COUNT = 10
@@ -133,34 +134,19 @@ def ttl_get_block(self) -> int:
     return self.subtensor.get_current_block()
 
 
-class AsyncDendritePool:
-    def __init__(self, wallet, metagraph):
-        self.metagraph = metagraph
-        self.dendrite = bt.dendrite(wallet=wallet)
-
-    async def async_forward(
-        self, uids: List[int], queries: List[AllReduce], timeout: float = 150.0
-    ):
-        def call_single_uid(uid, query):
-            return self.dendrite(
-                self.metagraph.axons[uid], synapse=query, timeout=timeout
-            )
-
-        async def query_async():
-            corutines = [
-                call_single_uid(uid, query) for uid, query in zip(uids, queries)
-            ]
-            return await asyncio.gather(*corutines)
-
-        return await query_async()
-
-
 def load_wandb(self, config, wallet, neuron_type, peer_id):
-    run_name = f"{config.neuron.run_id}_{neuron_type}_UID{self.uid}_{peer_id}"
+    run_name = f"{neuron_type[0].upper()}{'{:03}'.format(self.uid)}"
+
+    tags = [peer_id, __version__, self.wallet.hotkey.ss58_address, f"run{__run__}"]
+
+    run_id = "_".join([run_name] + tags[2:]).lower()
+
     wandb_run = wandb.init(
-        id=run_name,
+        id=run_id,
         name=run_name,
         anonymous="allow",
+        resume="allow",
+        tags=tags,
         project=config.neuron.wandb_project,
         entity=config.neuron.wandb_entity,
         config=config,
@@ -170,6 +156,7 @@ def load_wandb(self, config, wallet, neuron_type, peer_id):
     signature = wallet.hotkey.sign(config.neuron.run_id.encode()).hex()
     config.signature = signature
     wandb_run.config.update(config, allow_val_change=True)
+
     return wandb_run
 
 
@@ -354,7 +341,7 @@ def get_bandwidth():
     bandwidth_dict = {}
     keys = ["download", "upload", "ping"]
     for key in keys:
-        bandwidth_dict[key] = float(f"{results[key] / 1e6:.2f}")
+        bandwidth_dict[f"all_reduce/{key}"] = float(f"{results[key] / 1e6:.2f}")
 
     return bandwidth_dict
 

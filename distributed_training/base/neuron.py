@@ -115,7 +115,7 @@ class BaseNeuron(ABC):
             "repo_valid_count": 0,
             "repo_valid_score": 0,
             "all_reduce_successes": 0,
-            "all_reduce_counts": 0,
+            "all_reduce_count": 0,
             "all_reduce_score": 0,
             "total_score": 0,
             "loss": 0,
@@ -125,11 +125,11 @@ class BaseNeuron(ABC):
             for uid in self.metagraph.uids.tolist()
         }
         self.allreduce_timeout = 540
-        self.upload_state_duration = 150
+        self.upload_state_duration = 420
         self.all_reduce_success_status = True
         self.should_all_reduce = False
-        self.retry_limit = 10
-        self.retry_delay = 5
+        self.retry_limit = 100
+        self.retry_delay = 60
 
     # @abstractmethod # miner is not using this anymore
     async def forward(self, synapse: bt.Synapse) -> bt.Synapse:

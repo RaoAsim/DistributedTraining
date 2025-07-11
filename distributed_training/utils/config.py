@@ -22,6 +22,9 @@ import os
 import bittensor as bt
 import torch
 from distributed_training import __run__, __version__
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 def check_config(cls, config: "bt.Config"):
@@ -140,21 +143,29 @@ def add_args(cls, parser, prefix=None):
         nargs="+",
         help="The addresses for the DHT",
         default=[
-            "/ip4/161.97.156.125/tcp/8000/p2p/12D3KooWLiyHyX4SX7KP2bWrm24wg7AgMn5uPGotEKNpk8JxMNMR",
+            "/ip4/161.97.156.125/tcp/8000/p2p/12D3KooWRXATj82cqk2zi7uZ2Q1soPuML8ietJXM6RdGnMHGB73U",
         ],
     )
     parser.add_argument(
         "--neuron.blocks_per_allreduce",
         type=int,
         help="Amount of blocks between each all reduce",
-        default=3600,
+        default=1800,
     )
 
     parser.add_argument(
         "--neuron.global_model_name",
         type=str,
         help="The model to be trained",
-        default="distributed/optimized-gpt2-1b",
+        default="distributed/llama-1b",
+    )
+
+    parser.add_argument(
+        "--neuron.local_model_name",
+        type=str,
+        help="The model to be trained",
+        default=None,
+        required=neuron_type != "validator",
     )
 
     parser.add_argument(
@@ -175,7 +186,7 @@ def add_args(cls, parser, prefix=None):
         "--neuron.local_batch_size_train",
         type=int,
         help="The default batch size",
-        default=8,
+        default=4,
     )
 
     parser.add_argument(
@@ -189,14 +200,14 @@ def add_args(cls, parser, prefix=None):
         "--neuron.target_n_blocks",
         type=int,
         help="The hivemind global target_batch_size",
-        default=5,
+        default=2,
     )
 
     parser.add_argument(
         "--neuron.local_batch_size_train_effective",
         type=int,
         help="Amount of micro batches for gradient accumulation",
-        default=512,
+        default=2048,
     )
 
     parser.add_argument(
@@ -227,7 +238,56 @@ def add_args(cls, parser, prefix=None):
         default="kmfoda",
     )
 
+    parser.add_argument(
+        "--neuron.influxdb_bucket",
+        type=str,
+        help="The influxdb bucket",
+        default="distributed-training-metrics",
+    )
+
+    parser.add_argument(
+        "--neuron.influxdb_url",
+        type=str,
+        help="The influxdb url",
+        default="http://161.97.156.125:8086",
+    )
+
+    parser.add_argument(
+        "--neuron.influxdb_token",
+        type=str,
+        help="The influxdb token",
+        default="648b65eb0a5b1d7b48e71e695fd6bb6611936548debaf281cf438df8ce03b74b",
+    )
+
+    parser.add_argument(
+        "--neuron.influxdb_org",
+        type=str,
+        help="The influxdb org",
+        default="distributed-training",
+    )
+
     if neuron_type == "validator":
+        parser.add_argument(
+            "--neuron.uid_api_url",
+            type=str,
+            help="The url for the UID api.",
+            default="http://161.97.156.125:8002/uid",
+        )
+
+        parser.add_argument(
+            "--neuron.uid_api_get_token",
+            type=str,
+            help="The token for the UID get api.",
+            default=os.getenv("API_GET_TOKEN", None),
+        )
+
+        parser.add_argument(
+            "--neuron.uid_api_post_token",
+            type=str,
+            help="The token for the UID post api.",
+            default=os.getenv("API_POST_TOKEN", None),
+        )
+
         parser.add_argument(
             "--neuron.uid_isalive_limit",
             type=int,
@@ -239,20 +299,6 @@ def add_args(cls, parser, prefix=None):
             "--neuron.weight_update_interval",
             type=int,
             help="The number of steps before updating the model's weights",
-            default=900,
-        )
-
-        parser.add_argument(
-            "--neuron.training_examples_per_miner",
-            type=int,
-            help="The number of rows to train on per miner",
-            default=1024,
-        )
-
-        parser.add_argument(
-            "--neuron.upload_interval",
-            type=int,
-            help="The number of steps before uploading the model",
             default=900,
         )
 
@@ -302,14 +348,6 @@ def add_args(cls, parser, prefix=None):
         )
 
     else:
-        parser.add_argument(
-            "--neuron.local_model_name",
-            type=str,
-            help="The model to be trained",
-            default=None,
-            required=True,
-        )
-
         parser.add_argument(
             "--blacklist.force_validator_permit",
             action="store_true",

@@ -34,8 +34,6 @@ from distributed_training.utils.weight_utils import (
     process_weights_for_netuid,
 )
 from distributed_training.validator.reward import (
-    score_uid,
-    update_all_reduce_scores,
     update_total_scores,
 )
 from distributed_training.utils.progress_tracker import get_global_epoch
@@ -185,7 +183,6 @@ class BaseValidatorNeuron(BaseNeuron):
                         and (self.global_progress.epoch != current_global_epoch)
                         and (self.should_all_reduce)
                     ):
-                        update_all_reduce_scores(self)
                         update_total_scores(self)
 
                 # Run multiple forwards concurrently.
@@ -296,6 +293,7 @@ class BaseValidatorNeuron(BaseNeuron):
         bt.logging.info(raw_weights)
         bt.logging.info(f"raw_weights: {raw_weights}")
         bt.logging.info(f"raw_weight_uids: {self.metagraph.uids.tolist()}")
+
         # Process the raw weights to final_weights via subtensor limitations.
         (
             processed_weight_uids,
@@ -318,8 +316,8 @@ class BaseValidatorNeuron(BaseNeuron):
             uids=processed_weight_uids, weights=processed_weights
         )
 
-        bt.logging.debug(f"uint_weights: {uint_weights}")
-        bt.logging.debug(f"uint_uids: {uint_uids}")
+        bt.logging.info(f"uint_weights: {uint_weights}")
+        bt.logging.info(f"uint_uids: {uint_uids}")
 
         # Set the weights on chain via our subtensor connection.
         result, msg = self.subtensor.set_weights(
@@ -339,7 +337,7 @@ class BaseValidatorNeuron(BaseNeuron):
         # Log weigths to wandb
         self.event.update(
             {
-                f"weights.uid{processed_weight_uids}": processed_weights
+                f"uid_{processed_weight_uids}.weights": processed_weights
                 for processed_weight_uids, processed_weights in zip(
                     processed_weight_uids, processed_weights
                 )
@@ -368,7 +366,17 @@ class BaseValidatorNeuron(BaseNeuron):
         for uid, hotkey in enumerate(self.hotkeys):
             if hotkey != self.metagraph.hotkeys[uid]:
                 self.scores[uid] = 0  # hotkey has been replaced
-                self.uid_tracker[uid] = self.uid_tracker_initial_state
+                self.uid_tracker[uid] = self.uid_tracker_initial_state.copy()
+                train_similarity_score_last_updated_list = [
+                    self.uid_tracker[uid]["train_similarity_score_last_updated"]
+                    for uid in self.uid_tracker.keys()
+                    if self.uid_tracker[uid]["train_similarity_score_last_updated"] != 0
+                ]
+                if len(train_similarity_score_last_updated_list) >= 2:
+                    train_similarity_score_last_updated_list.sort()
+                    self.uid_tracker[uid][
+                        "train_similarity_score_last_updated"
+                    ] = train_similarity_score_last_updated_list[1] + (60 * 60)
 
         # Check to see if the metagraph has changed size.
         # If so, we need to add new hotkeys and moving averages.
@@ -481,6 +489,9 @@ class BaseValidatorNeuron(BaseNeuron):
             if "uid_tracker" in state:
                 self.uid_tracker = state["uid_tracker"].flatten()[0]
                 for uid in self.uid_tracker:
+                    self.uid_tracker[uid] = self.uid_tracker[uid].copy()
+
+                for uid in self.uid_tracker:
                     try:
                         if (
                             self.uid_tracker[uid].keys()
@@ -494,7 +505,6 @@ class BaseValidatorNeuron(BaseNeuron):
                             f"Failed to load saved uid_tracker for UID: {uid} with error: {e}"
                         )
                         self.uid_tracker[uid] = self.uid_tracker_initial_state.copy()
-
         elif os.path.isfile(self.config.neuron.full_path + "/state.pt"):
             bt.logging.info(
                 "Pre-saved validator state found in .pt format. Loading validator state."

@@ -18,18 +18,18 @@
 import asyncio
 import gc
 import os
-import queue
 import random
-import tempfile
+import subprocess
 import time
 import typing
-from enum import Enum
 
 os.environ["NEST_ASYNCIO"] = "0"
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from queue import Queue
 
 import bittensor as bt
+import psutil
 import torch
 from hivemind.averaging.averager import compute_schema_hash
 from huggingface_hub import (
@@ -38,17 +38,20 @@ from huggingface_hub import (
     delete_tag,
     list_repo_refs,
     repo_exists,
-    upload_folder,
 )
+from influxdb_client import InfluxDBClient, Point
+from influxdb_client.client.write_api import SYNCHRONOUS
 from transformers import AutoModelForCausalLM, AutoTokenizer
-
+import json
 import distributed_training
-from distributed_training.averaging.avg_handler import AllReduceError, AveragingHandler
-from distributed_training.base.miner import BaseMinerNeuron
+from distributed_training import __run__
+from collections import deque
+
+# from distributed_training.averaging.avg_handler import AllReduceError
+from distributed_training.base.miner import BaseMinerNeuron, TrainingStatus
 from distributed_training.data.dataset import DatasetLoader
 from distributed_training.utils.chain import log_peerid_to_chain
 from distributed_training.utils.misc import (
-    get_bandwidth,
     init_dht,
     load_wandb,
     setup_logging,
@@ -57,7 +60,7 @@ from distributed_training.utils.progress_tracker import (
     GlobalTrainingProgress,
     LocalTrainingProgress,
     get_global_epoch,
-    get_local_epoch,
+    get_local_inner_step,
 )
 from distributed_training.utils.state_loader import (
     FastModelLoader,
@@ -74,13 +77,6 @@ torch.backends.cudnn.allow_tf32 = True
 # Seeds
 torch.manual_seed(42)
 torch.cuda.manual_seed(42)
-
-
-class TrainingStatus(Enum):
-    ERROR = "❗ | Error"
-    RUNNING = "🏋️ | Training"
-    STOPPED = "😴 | Stopped"
-    AVERAGING = "🔄 | Averaging"
 
 
 class Miner(BaseMinerNeuron):
@@ -103,7 +99,9 @@ class Miner(BaseMinerNeuron):
         self.device = self.config.neuron.device
         self.uid = self.metagraph.hotkeys.index(self.wallet.hotkey.ss58_address)
         init_dht(self)
-
+        self.current_block = self.metagraph.block.item()
+        self.current_training=[]
+        self.seen_data_hashes = deque(maxlen=5)
         # Progress tracking
         self._init_progress_tracking()
 
@@ -115,6 +113,143 @@ class Miner(BaseMinerNeuron):
 
         # Training components
         self._init_training_components()
+
+        # Tracking metrics
+        self._init_metrics_collection()
+
+    def _init_metrics_collection(self):
+        # Initialize InfluxDB client
+        self.influx_client = None
+        self.influx_write_api = None
+        try:
+            bt.logging.info(
+                "Attempting to initialize InfluxDB client for metrics collection..."
+            )
+            self.influx_client = InfluxDBClient(
+                url=self.config.neuron.influxdb_url,
+                token=self.config.neuron.influxdb_token,
+                org=self.config.neuron.influxdb_org,
+            )
+
+            self.influx_write_api = self.influx_client.write_api(
+                write_options=SYNCHRONOUS
+            )
+            bt.logging.info("InfluxDB client and write_api initialized successfully.")
+
+            # Create a background thread for periodic metric submission
+            self.metrics_thread = threading.Thread(target=self._report_metrics_loop)
+            self.metrics_thread.daemon = True
+            self.metrics_thread.start()
+            bt.logging.info("Metrics tracking thread initialized successfully.")
+
+        except Exception as e:
+            bt.logging.error(
+                f"Failed to initialize InfluxDB client: {e}. Metrics collection will be disabled."
+            )
+            if self.influx_client:
+                try:
+                    self.influx_client.close()
+                except Exception as close_e:
+                    bt.logging.error(
+                        f"Error closing InfluxDB client during cleanup: {close_e}"
+                    )
+            self.influx_client = None
+            self.influx_write_api = None
+
+    def _report_metrics_loop(self):
+        """Periodically send metrics to InfluxDB"""
+        while not self.stop_event.is_set():
+            try:
+                self._report_current_metrics()
+            except Exception as e:
+                bt.logging.error(f"Error reporting metrics: {e}")
+            time.sleep(30)  # Report every 30 seconds
+
+    def _report_current_metrics(self):
+        """Send current miner metrics to InfluxDB"""
+        points = []
+
+        # Training metrics
+        point = (
+            Point("training_metrics")
+            .tag("miner_uid", str(self.uid))
+            .tag("hotkey", self.wallet.hotkey.ss58_address)
+            .tag("epoch", str(self.local_progress.epoch))
+            .tag("inner_step", str(self.local_progress.inner_step))
+            .field("loss", self.local_progress.loss)
+            .field("samples_accumulated", self.local_progress.samples_accumulated)
+            .field("samples_per_second", self.local_progress.samples_per_second)
+        )
+        points.append(point)
+
+        # Resource metrics
+        point = (
+            Point("resource_metrics")
+            .tag("miner_uid", str(self.uid))
+            .tag("hotkey", self.wallet.hotkey.ss58_address)
+            .field("cpu_percent", psutil.cpu_percent())
+            .field("memory_percent", psutil.virtual_memory().percent)
+            .field("gpu_utilization", self._get_gpu_utilization())
+        )
+        points.append(point)
+
+        # Network metrics
+        point = (
+            Point("network_metrics")
+            .tag("miner_uid", str(self.uid))
+            .tag("hotkey", self.wallet.hotkey.ss58_address)
+            .field("bandwidth", self._get_network_bandwidth())
+        )
+        points.append(point)
+
+        # Metagraph metrics
+        point = (
+            Point("metagraph_metrics")
+            .tag("miner_uid", str(self.uid))
+            .tag("hotkey", self.wallet.hotkey.ss58_address)
+            .field("stake", float(self.metagraph.stake[self.uid]))
+            .field("trust", float(self.metagraph.trust[self.uid]))
+            .field("consensus", float(self.metagraph.consensus[self.uid]))
+            .field("incentive", float(self.metagraph.incentive[self.uid]))
+            .field("emissions", float(self.metagraph.emission[self.uid]))
+        )
+        points.append(point)
+
+        # Write points to InfluxDB
+        self.influx_write_api.write(
+            bucket=self.config.neuron.influxdb_bucket,
+            org=self.config.neuron.influxdb_org,
+            record=points,
+        )
+
+    def _get_gpu_utilization(self):
+        """Get GPU utilization percentage"""
+        try:
+            if self.device.startswith("cuda"):
+                result = (
+                    subprocess.check_output(
+                        [
+                            "nvidia-smi",
+                            "--query-gpu=utilization.gpu",
+                            "--format=csv,noheader,nounits",
+                        ]
+                    )
+                    .decode("utf-8")
+                    .strip()
+                )
+                return float(result)
+        except:
+            pass
+        return 0.0
+
+    def _get_network_bandwidth(self):
+        """Get network bandwidth usage in MB/s"""
+        # Implement based on your system's network monitoring
+        try:
+            # This is a placeholder - implement actual bandwidth measurement
+            return random.uniform(20, 30)  # MB/s
+        except:
+            return 0.0
 
     def _init_progress_tracking(self):
         self.local_progress = LocalTrainingProgress(
@@ -129,7 +264,8 @@ class Miner(BaseMinerNeuron):
         )
         self.global_progress = GlobalTrainingProgress(epoch=0, samples_accumulated=0)
         self.global_progress.epoch = get_global_epoch(self)
-        self.local_progress.epoch = get_local_epoch(self)
+        self.local_progress.epoch = self.global_progress.epoch
+        self.local_progress.inner_step = get_local_inner_step(self)
 
         if self.global_progress.epoch is None:
             bt.logging.error(
@@ -142,14 +278,16 @@ class Miner(BaseMinerNeuron):
         self.stop_event = threading.Event()
 
         # Training control
-        self.training_thread = None
         self.training_active = threading.Event()
         self.training_active.set()
 
         # Queue and executor
-        self.training_queue = queue.Queue()
+        self.next_block_to_fetch = self.current_block
+        self.block_counter_lock = threading.Lock()
+        self.data_queue = asyncio.Queue(maxsize=2) # Holds a buffer of 2 datasets
+
         self.training_executor = ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="training_worker"
+            max_workers=3, thread_name_prefix="training_worker" # Now needs 2 workers
         )
 
         # Async components
@@ -160,6 +298,32 @@ class Miner(BaseMinerNeuron):
         self.training_status = TrainingStatus.STOPPED
         self.training_error = None
 
+        # Save directory
+        self.output_dir = self.config.neuron.local_model_name.split("/")[-1]
+
+        # Create Tag Deletion Queue & Thread
+        self.tag_deletion_queue = Queue()
+        self.tag_deletion_thread = threading.Thread(target=self.delete_tags)
+        self.tag_deletion_thread.start()
+
+    def delete_tags(self):
+        while True:
+            if self.tag_deletion_queue.qsize() <= 0:
+                time.sleep(60)
+            else:
+                tag_name = self.tag_deletion_queue.get()
+                try:
+                    # Update tag for this version
+                    delete_tag(
+                        self.config.neuron.local_model_name,
+                        repo_type="model",
+                        tag=tag_name,
+                    )
+                    bt.logging.info(f"Succesfully deleted tag {tag_name}")
+                except Exception as e:
+                    bt.logging.info(f"Failed to delete tag {tag_name} with error {e}")
+                time.sleep(30)
+
     def _init_model_components(self):
         """Initialize model-related components including tokenizer and optimizer settings."""
         self._init_tokenizer()
@@ -167,13 +331,21 @@ class Miner(BaseMinerNeuron):
         self._load_model()
         self._setup_training_params()
 
+    def _run_async_loop(self):
+        """A dedicated worker to run the asyncio event loop."""
+        bt.logging.info("Starting asyncio event loop.")
+        self.training_loop.run_forever()
+        bt.logging.info("Asyncio event loop stopped.")
+
     def _init_tokenizer(self):
-        self.tokenizer = AutoTokenizer.from_pretrained("distilgpt2", use_fast=False)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.config.neuron.global_model_name, use_fast=True
+        )
         self.tokenizer.pad_token = self.tokenizer.eos_token
 
     def _setup_model_params(self):
         # Optimizer settings
-        self.learning_rate_maximum = 6e-4
+        self.learning_rate_maximum = 4e-4
         self.weight_decay = 0.1
         self.num_inner_steps = 500
         self.offload_optimizer = True
@@ -190,6 +362,7 @@ class Miner(BaseMinerNeuron):
         load_model_optimizer_gradient_averager(
             self, self.config.neuron.local_model_name, self.local_progress.epoch
         )
+        self.model.config.block_list = []
         cleanup_old_cache(self, repo_id=self.config.neuron.local_model_name)
 
         # Setup upload executor
@@ -197,6 +370,7 @@ class Miner(BaseMinerNeuron):
             max_workers=1, thread_name_prefix="model_upload"
         )
         self.current_upload_future = None
+        self.upload_process = None
 
         # Sync and initialize handlers
         self._sync_with_global_model()
@@ -214,6 +388,7 @@ class Miner(BaseMinerNeuron):
 
         self.running_loss = 0.0
         self.batch_count = 0
+        self.last_allreduce_block = None
 
     def _init_network_components(self):
         """Initialize network and P2P components"""
@@ -223,8 +398,8 @@ class Miner(BaseMinerNeuron):
     def _sync_with_global_model(self):
         global_model = AutoModelForCausalLM.from_pretrained(
             self.config.neuron.global_model_name,
-            revision=str(self.global_progress.epoch),
-            trust_remote_code=True,
+            revision=f"{__run__}.{self.global_progress.epoch}.0",
+            trust_remote_code=False,
         )
 
         if self.config.neuron.global_model_name == self.config.neuron.local_model_name:
@@ -248,14 +423,15 @@ class Miner(BaseMinerNeuron):
             torch.cuda.empty_cache()
             load_state_from_peer(self, epoch=self.global_progress.epoch)
             self.start_background_upload(
-                epoch=self.global_progress.epoch, inner_step=0, batch_size=0
+                epoch=self.global_progress.epoch,
+                block_list_snapshot=self.model.config.block_list
             )
         else:
             del global_model
             gc.collect()
             torch.cuda.empty_cache()
 
-    def upload_model(self, epoch, inner_step, batch_size):
+    def upload_model(self, epoch,block_list_snapshot):
         """Unified function to save and upload both model and optimizer state"""
         if not repo_exists(self.config.neuron.local_model_name, repo_type="model"):
             try:
@@ -278,57 +454,102 @@ class Miner(BaseMinerNeuron):
                 bt.logging.info("Upload Cancelled Due To AllReduce Operation")
                 return False
             try:
-                with tempfile.TemporaryDirectory() as tmp_folder:
-                    bt.logging.info(
-                        f":memory: Saving model state locally for epoch {epoch}"
-                    )
-                    self.model.config.inner_step = self.local_progress.inner_step
-                    self.model.save_pretrained(tmp_folder)
+                if not os.path.exists(self.output_dir):
+                    os.makedirs(self.output_dir)
+                bt.logging.info(
+                    f":memory: Saving model state locally for epoch {epoch}"
+                )
+                self.model.config.inner_step = self.local_progress.inner_step
+                self.model.config.block_list = block_list_snapshot
 
-                    bt.logging.info(
-                        f":upload: Uploading model and optimizer states to repo: {self.config.neuron.local_model_name}"
-                    )
-                    commit_message = f"Outer Step {epoch}. Inner Step {inner_step}. Batch Size {batch_size}"
-                    upload_folder(
-                        folder_path=tmp_folder,
-                        repo_id=self.config.neuron.local_model_name,
-                        repo_type="model",
-                        commit_message=commit_message,
-                    )
-                    refs = list_repo_refs(
-                        self.config.neuron.local_model_name, repo_type="model"
-                    )
-                    for tag in refs.tags:
-                        if (tag.name == "None") or (int(tag.name) >= epoch):
-                            # Update tag for this version
-                            delete_tag(
-                                self.config.neuron.local_model_name,
-                                repo_type="model",
-                                tag=tag.name,
-                            )
-                            time.sleep(5)
-                    # Create new tag for this version
-                    create_tag(
+                self.model.save_pretrained(os.path.join(self.output_dir))
+
+                local_block_list_copy = list(block_list_snapshot)
+                block_list = self.model.config.block_list
+
+                # Save optimizer state
+                optimizer_state = {
+                    "optimizer_state_dict": self.inner_optimizer.state_dict(),
+                    "learning_rate": self.inner_optimizer.param_groups[0]["lr"],
+                    "scheduler_state": self.scheduler.state_dict(),
+                    "epoch": epoch,
+                }
+                torch.save(
+                    optimizer_state,
+                    os.path.join(
+                        self.output_dir,
+                        "inner_optimizer.pt",
+                    ),
+                )
+
+                bt.logging.info(
+                    f":upload: Uploading model and optimizer states to repo: {self.config.neuron.local_model_name}"
+                )
+                commit_message = f"Run {__run__}. Outer Step {epoch}. Inner Step {self.local_progress.inner_step}."
+                self.upload_process = subprocess.Popen(
+                    [
+                        "python",
+                        os.path.abspath(__file__).replace(
+                            "neurons/miner.py",
+                            "distributed_training/utils/upload_worker.py",
+                        ),
                         self.config.neuron.local_model_name,
-                        repo_type="model",
-                        tag=str(epoch),
-                        tag_message=commit_message,
-                    )
-                    # Cleanup old cache
-                    cleanup_old_cache(
-                        self,
-                        repo_id=self.config.neuron.local_model_name,
-                        current_revision=None,
-                    )
+                        self.output_dir,
+                        commit_message,
+                    ]
+                )
+                while self.upload_process.poll() is None:
+                    if not self.training_active.is_set():
+                        self.upload_process.kill()
+                        bt.logging.info(
+                            "Cancelling Ongoing Model Upload For AllReduce Operation"
+                        )
+                        self.model.config.block_list = (
+                            block_list + self.model.config.block_list
+                        )
+                        return False
+                    else:
+                        time.sleep(5)
 
-                    bt.logging.info(
-                        f"Successfully pushed new model state with tag {epoch} to repo: {self.config.neuron.local_model_name}"
-                    )
+                refs = list_repo_refs(
+                    self.config.neuron.local_model_name, repo_type="model"
+                )
+                for tag in refs.tags:
+                    if (tag.name == "None") or (
+                        tag.name == f"{__run__}.{epoch}.{self.model.config.inner_step}"
+                    ):
+                        # Update tag for this version
+                        delete_tag(
+                            self.config.neuron.local_model_name,
+                            repo_type="model",
+                            tag=tag.name,
+                        )
+                        time.sleep(30)
+                    elif (
+                        (len(tag.name.split(".")) == 3)
+                        and (tag.name.split(".")[0] == __run__)
+                        and (int(tag.name.split(".")[1]) > epoch)
+                    ):
+                        self.tag_deletion_queue.put(tag.name)
+                # Create new tag for this version
+                create_tag(
+                    self.config.neuron.local_model_name,
+                    repo_type="model",
+                    tag=f"{__run__}.{epoch}.{self.model.config.inner_step}",
+                    tag_message=commit_message,
+                )
+                # Cleanup old cache
+                cleanup_old_cache(
+                    self,
+                    repo_id=self.config.neuron.local_model_name,
+                    current_revision=None,
+                )
 
-                    # Reset block_list
-                    self.model.config.block_list = []
+                bt.logging.info(
+                    f"Successfully pushed new model state with tag {__run__}.{epoch}.{self.model.config.inner_step} to repo: {self.config.neuron.local_model_name}"
+                )
 
-                    return True
+                return True
 
             except Exception as e:
                 attempt += 1
@@ -341,10 +562,12 @@ class Miner(BaseMinerNeuron):
                     bt.logging.error(
                         "Maximum retry limit reached. Unable to upload state to HF Hub."
                     )
+                    self.model.config.block_list.extend(local_block_list_copy)
                     raise
+
         return False
 
-    def start_background_upload(self, epoch, inner_step, batch_size):
+    def start_background_upload(self, epoch,block_list_snapshot):
         """Starts a background upload of the model state, managing ongoing uploads."""
         # If there's an ongoing upload, check if it's done
         if self.current_upload_future and not self.current_upload_future.done():
@@ -353,14 +576,14 @@ class Miner(BaseMinerNeuron):
 
         # Start new upload
         self.current_upload_future = self.upload_executor.submit(
-            self.upload_model, epoch, inner_step, batch_size
+            self.upload_model, epoch,block_list_snapshot 
         )
 
         # Optional: Add callback to handle completion
         def upload_completed(future):
             try:
-                future.result()  # This will raise any exceptions that occurred
-                bt.logging.info("Model state upload completed successfully")
+                result = future.result()  # This will raise any exceptions that occurred
+                bt.logging.info(f"Model state upload completed with result: {result}")
             except Exception as e:
                 bt.logging.error(f"Model state upload failed: {str(e)}")
 
@@ -368,12 +591,12 @@ class Miner(BaseMinerNeuron):
 
     def get_miner_info(self):
         return {
-            "block": self.metagraph.block.item(),
-            "stake": self.metagraph.stake[self.uid],
-            "trust": self.metagraph.trust[self.uid],
-            "consensus": self.metagraph.consensus[self.uid],
-            "incentive": self.metagraph.incentive[self.uid],
-            "emissions": self.metagraph.emission[self.uid],
+            "bittensor/block": self.metagraph.block.item(),
+            "bittensor/stake": self.metagraph.stake[self.uid],
+            "bittensor/trust": self.metagraph.trust[self.uid],
+            "bittensor/consensus": self.metagraph.consensus[self.uid],
+            "bittensor/incentive": self.metagraph.incentive[self.uid],
+            "bittensor/emissions": self.metagraph.emission[self.uid],
         }
 
     async def is_alive(
@@ -389,15 +612,17 @@ class Miner(BaseMinerNeuron):
         if self.training_status != TrainingStatus.RUNNING:
             self.training_status = TrainingStatus.RUNNING
             self.training_error = None
+            self.training_executor.submit(self._run_async_loop) # Start the loop runner
             self.training_executor.submit(self._training_worker)
+            self.training_executor.submit(self._data_prefetcher_worker)
             bt.logging.info(
-                ":white_heavy_check_mark: Starting continuous training worker"
+                ":runner: Starting training, prefetching, and event loop workers."
             )
-
     def pause_training(self):
         """Pauses the continuous training loop"""
         self.training_active.clear()
-        self.training_status = TrainingStatus.AVERAGING
+        time.sleep(1)
+        self.training_status = TrainingStatus.PAUSED
         bt.logging.info(":warning:  Pausing continuous training.")
 
     def resume_training(self):
@@ -406,14 +631,48 @@ class Miner(BaseMinerNeuron):
         self.training_status = TrainingStatus.RUNNING
         bt.logging.info(":white_heavy_check_mark: Resuming continuous training.")
 
-    async def fetch_training_data(self):
+    # Add this new method to the Miner class
+    def _data_prefetcher_worker(self):
+        """
+        A background worker that safely submits prefetching tasks to the running asyncio loop.
+        """
+        while not self.stop_event.is_set():
+            try:
+                self.training_active.wait()
+
+                if not self.data_queue.full():
+                    with self.block_counter_lock:
+                        # Get the next block number and immediately increment the counter
+                        block_to_fetch = self.next_block_to_fetch
+                        self.next_block_to_fetch += 1                    
+                    # Create the coroutine we want to run
+                    fetch_coro = self.fetch_training_data(block_to_fetch)
+                    
+                    # Submit it to the loop in a thread-safe way and wait for the result
+                    future = asyncio.run_coroutine_threadsafe(fetch_coro, self.training_loop)
+                    dataset = future.result() # This blocks until the download is done
+
+                    # Now, submit the queue 'put' operation
+                    put_coro = self.data_queue.put((dataset, block_to_fetch))
+                    asyncio.run_coroutine_threadsafe(put_coro, self.training_loop).result()
+
+                else:
+                    time.sleep(1)
+
+            except Exception as e:
+                # Check if the loop is still running before logging, to avoid errors on shutdown
+                if self.training_loop.is_running():
+                    bt.logging.error(f"Data prefetcher failed with error: {e}")
+                time.sleep(10)
+
+    async def fetch_training_data(self,block_to_fetch):
         """Async function to fetch training data"""
         attempt = 0
         while attempt < self.retry_limit:
             try:
                 pages = await DatasetLoader.next_pages(
-                    offset=self.current_block,
-                    n_pages=5,
+                    offset=block_to_fetch,
+                    n_pages=35,
                     seed=self.uid,
                 )
                 random.seed(self.uid)
@@ -434,47 +693,69 @@ class Miner(BaseMinerNeuron):
                     f"Failed to fetch data, retrying. Attempt {attempt}/{self.retry_limit}"
                 )
                 if attempt < self.retry_limit:
-                    time.sleep(self.retry_delay)  # Wait before the next retry
+                    time.sleep(self.retry_delay * attempt)  # Wait before the next retry
                 else:
                     bt.logging.error(
                         "Maximum retry limit reached. Unable to fetch data."
                     )
                     raise
 
+# Modify the _training_worker method
     def _training_worker(self):
-        """Worker function that runs in the ThreadPoolExecutor"""
-
-        asyncio.set_event_loop(self.training_loop)
-
+        """
+        Worker that safely gets data from the queue via the running asyncio loop.
+        """
         while not self.stop_event.is_set():
             try:
-                # Wait if training is paused
                 self.training_active.wait()
 
-                # Periodic model upload
-                if (
-                    len(self.model.config.block_list)
-                    >= self.config.neuron.target_n_blocks
-                ):
+                # Create the coroutine to get an item from the queue
+                get_coro = self.data_queue.get()
+                
+                # Submit it to the loop and wait for the result
+                future = asyncio.run_coroutine_threadsafe(get_coro, self.training_loop)
+                dataset, block_number = future.result()
+                                # --- START: DATA VERIFICATION CHECK ---
+                # try:
+                #     # Get the first batch of the dataset to create a sample
+                #     first_batch = next(iter(dataset))
+                #     inputs, _ = first_batch
+                    
+                #     # Create a hash from the raw tensor data of the first sample
+                #     # .tobytes() is a fast way to get a hashable representation
+                #     sample_hash = hash(inputs[0].cpu().numpy().tobytes())
+
+                #     if sample_hash in self.seen_data_hashes:
+                #         bt.logging.error(f"CRITICAL: Duplicate data detected for block {block_number}! Hash: {sample_hash}")
+                #     else:
+                #         bt.logging.success(f"Verified unique data for block {block_number}.")
+                #         self.seen_data_hashes.append(sample_hash)
+
+                # except Exception as e:
+                #     bt.logging.warning(f"Could not perform data verification check for block {block_number}: {e}")
+
+
+                bt.logging.info(f":fast_forward: Training on data from block {block_number}.")
+                self.current_training.append(block_number)
+                self._process_training_batch(dataset)
+    
+                if len(self.current_training) == self.config.neuron.target_n_blocks:
+                    bt.logging.info(f"VERIFICATION (TRAINER): Triggering upload with current block_list: {self.current_training}")
+                    blocks_to_upload = list(self.current_training)
+                    self.current_training.clear()
+                    self.model.config.block_list.clear()
                     self.start_background_upload(
                         epoch=self.local_progress.epoch,
-                        inner_step=self.local_progress.inner_step,
-                        batch_size=self.local_progress.samples_accumulated,
+                        block_list_snapshot=blocks_to_upload
                     )
-
-                bt.logging.info(":pages: Fetching fineweb-edu pages")
-                dataset = self.training_loop.run_until_complete(
-                    self.fetch_training_data()
-                )
-                self.model.config.block_list.append(self.current_block)
-
-                self._process_training_batch(dataset)
+                    
             except Exception as e:
-                bt.logging.warning(f"Training Loop Failed with error: {e}")
+                if self.training_loop.is_running():
+                    bt.logging.warning(f"Training Loop Failed with error: {e}")
                 self.training_status = TrainingStatus.ERROR
                 self.training_error = str(e)
                 break
-
+                
         self.training_status = TrainingStatus.STOPPED
 
     def _process_training_batch(self, dataset):
@@ -482,19 +763,18 @@ class Miner(BaseMinerNeuron):
 
         for inputs, labels in dataset:
             if not self.training_active.is_set():
-                self.inner_optimizer.zero_grad()
                 break
 
             # Move to device
             inputs, labels = inputs.to(self.device), labels.to(self.device)
 
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                _, loss = self.model(input_ids=inputs, labels=labels)
-                scaled_loss = loss / self.number_of_local_steps
+                outputs = self.model(input_ids=inputs, labels=labels)
+                loss = outputs.loss / self.number_of_local_steps
 
-            scaled_loss.backward()
+            loss.backward()
 
-            self.running_loss += loss.item()
+            self.running_loss += loss.item() * self.number_of_local_steps
             self.batch_count += 1
             self.local_progress.loss = self.running_loss / self.batch_count
 
@@ -502,37 +782,44 @@ class Miner(BaseMinerNeuron):
 
             if (
                 self.local_progress.samples_accumulated
-                % (self.logging_interval * self.local_batch_size_train)
-                == 0
+                >= self.local_batch_size_train_effective
             ):
                 bt.logging.info(
                     f":training:  Outer Step: {self.local_progress.epoch} | "
                     f"Inner Step: {self.local_progress.inner_step} | "
-                    f"Average Loss: {self.local_progress.loss:.4f} | "
-                    f"Micro Batches: [{self.local_progress.samples_accumulated}/{self.local_batch_size_train_effective}]"
+                    f"Learning Rate: {self.inner_optimizer.param_groups[0]['lr']:.8f} | "
+                    f"Average Loss: {self.local_progress.loss:.2f}"
                 )
 
-            if (
-                self.local_progress.samples_accumulated
-                >= self.local_batch_size_train_effective
-            ):
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                 self.event.update(
                     {
-                        "outer_step": self.local_progress.epoch,
-                        "inner_step": self.local_progress.inner_step,
-                        "loss": self.local_progress.loss,
-                        "samples_accumulated": self.local_progress.samples_accumulated,
+                        "train/outer_step": self.local_progress.epoch,
+                        "train/inner_step": self.local_progress.inner_step,
+                        "train/loss": self.local_progress.loss,
+                        "train/learning_rate": self.inner_optimizer.param_groups[0][
+                            "lr"
+                        ],
+                        "train/total_step": self.scheduler._step_count,
                     }
                 )
-                self.inner_optimizer.step()
-                self.inner_optimizer.zero_grad()
-                self.local_progress.inner_step += 1
 
-                self.running_loss = 0.0
-                self.batch_count = 0
+                # Run inner optimizer step
+                self.inner_optimizer_step()
 
-                self.local_progress.samples_accumulated = 0
+    def inner_optimizer_step(self):
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+        self.inner_optimizer.step()
+
+        self.scheduler.step()
+
+        self.inner_optimizer.zero_grad()
+
+        self.local_progress.inner_step += 1
+
+        self.running_loss = 0.0
+        self.batch_count = 0
+
+        self.local_progress.samples_accumulated = 0
 
     async def all_reduce(
         self, synapse: distributed_training.protocol.AllReduce
@@ -549,8 +836,31 @@ class Miner(BaseMinerNeuron):
                     )
                     self.current_upload_future.cancel()
 
-                # # Ensure training is paused
+                # Ensure training is paused
                 self.pause_training()
+
+                # Run inner optimizer step
+                self.inner_optimizer_step()
+
+                # Update gradient averager params to latest synapse values
+                if synapse.min_group_size is not None:
+                    self.grad_averager.matchmaking_kwargs[
+                        "min_group_size"
+                    ] = synapse.min_group_size
+                if synapse.request_timeout is not None:
+                    self.grad_averager.matchmaking_kwargs[
+                        "request_timeout"
+                    ] = synapse.request_timeout
+                if synapse.allreduce_timeout is not None:
+                    self.grad_averager._allreduce_timeout = (
+                        synapse.synapse.allreduce_timeout
+                    )
+                if synapse.next_chunk_timeout is not None:
+                    self.grad_averager.next_chunk_timeout = synapse.next_chunk_timeout
+                if synapse.min_matchmaking_time is not None:
+                    self.grad_averager.matchmaking_kwargs[
+                        "min_matchmaking_time"
+                    ] = synapse.min_matchmaking_time
 
                 try:
                     # Run allreduce with proper timeout
@@ -558,25 +868,38 @@ class Miner(BaseMinerNeuron):
                         synapse,
                         self.local_progress,
                         self.all_reduce_start_time,
+                        self.current_block,
                         # bandwidth
                     )
                     if not synapse.completion:
-                        raise AllReduceError("AllReduce Failed, Loading Latest State")
+                        raise Exception("AllReduce Failed, Loading Latest State")
                 except Exception as e:
                     bt.logging.info(f"All Reduce Failed with error: {e}")
                     synapse.completion = False
 
         except Exception as e:
             synapse.completion = False
-            raise AllReduceError(f"Unexpected error during AllReduce: {str(e)}") from e
+            raise Exception(f"Unexpected error during AllReduce: {str(e)}") from e
 
         finally:
-            # Reset inner_step
-            self.local_progress.inner_step = 0
             # Update epoch if all_reduce was succsefull
             if synapse.completion is True:
+                # Reset inner_step and update epoch
+                while not self.data_queue.empty():
+                    self.data_queue.get_nowait()
+                    bt.logging.info(":wastebasket: Cleared prefetch queue due to successful All-Reduce.")
+                with self.block_counter_lock:
+                    self.next_block_to_fetch = self.last_allreduce_block + 1
+                bt.logging.info(f"Reset prefetch counter to start at block {self.next_block_to_fetch}.")
+                self.local_progress.samples_accumulated = 0
+                self.local_progress.inner_step = 0
                 self.local_progress.epoch += 1
+                self.last_allreduce_block = self.current_block
                 bt.logging.info("AllReduce Operation Finished Succesfully")
+                self.start_background_upload(
+                    epoch=self.local_progress.epoch,
+                    block_list_snapshot=[]
+                )
                 # Resume training when done
                 self.resume_training()
             else:
