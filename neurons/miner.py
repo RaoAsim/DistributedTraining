@@ -94,6 +94,8 @@ class Miner(BaseMinerNeuron):
         self._init_basic_components()
         self._init_model_components()
         self._init_network_components()
+        DatasetLoader.initialize_stream(seed=self.uid)
+
 
     def _update_wandb_project(self):
         suffix = "_miners" if self.neuron_type == "MinerNeuron" else "_validators"
@@ -785,80 +787,78 @@ class Miner(BaseMinerNeuron):
         self.logger.info(":white_heavy_check_mark: Resuming continuous training.")
 
     async def fetch_training_data(self):
-        """Async function to fetch training data"""
-        attempt = 0
-        while attempt < self.retry_limit:
-            try:
-                pages = await DatasetLoader.next_pages(
-                    offset=self.current_block,
-                    n_pages=35,
-                    seed=self.uid,
-                )
-                random.seed(self.uid)
-                random.shuffle(pages)
+        """
+        Async function to fetch a finite chunk of training data for one cycle.
+        This now mimics the "35 pages" behavior perfectly.
+        """
+        try:
+            # Equivalent of 35 pages (35 pages * 100 rows/page)
+            num_samples_for_cycle = 35 * 100 
 
-                dataset = await DatasetLoader.create(
-                    batch_size=self.config.neuron.local_batch_size_train,
-                    sequence_length=1024,
-                    pages_info=pages,
-                    tokenizer=self.tokenizer,
-                )
-
-                return dataset
-            except Exception as e:
-                self.logger.error(f"Error fetching training data: {str(e)}")
-                attempt += 1
-                self.logger.warning(
-                    f"Failed to fetch data, retrying. Attempt {attempt}/{self.retry_limit}"
-                )
-                if attempt < self.retry_limit:
-                    time.sleep(self.retry_delay * attempt)  # Wait before the next retry
-                else:
-                    self.logger.error(
-                        "Maximum retry limit reached. Unable to fetch data."
-                    )
-                    raise
+            # Create a dataset instance that will provide exactly that many samples
+            dataset = DatasetLoader.from_stream(
+                batch_size=self.config.neuron.local_batch_size_train,
+                sequence_length=1024,
+                tokenizer=self.tokenizer,
+                num_samples=num_samples_for_cycle
+            )
+            return dataset
+        except Exception as e:
+            bt.logging.error(f"Error fetching training data from stream: {str(e)}")
+            raise
 
     def _training_worker(self):
-        """Worker function that runs in the ThreadPoolExecutor"""
-
+        """
+        ### MODIFIED ###
+        This worker function now has the corrected logic to ensure the
+        train -> count -> upload sequence is followed correctly.
+        """
         asyncio.set_event_loop(self.training_loop)
 
         while not self.stop_event.is_set():
             try:
-                # Wait if training is paused
+                # Wait if training is paused by an AllReduce operation
                 self.training_active.wait()
 
-                # Periodic model upload
-                if (
-                    len(self.model.config.block_list)
-                    >= self.config.neuron.target_n_blocks
-                ):
-                    self.start_background_upload(
-                        epoch=self.local_progress.epoch,
-                    )
-
-                self.logger.debug(":pages: Fetching fineweb-edu pages")
+                # --- Step 1: Fetch a finite batch of data ---
+                self.logger.info("📑 Fetching next training data batch...")
                 dataset = self.training_loop.run_until_complete(
                     self.fetch_training_data()
                 )
 
-                # Wait if training is paused
-                self.training_active.wait()
-
-                self.model.config.block_list.append(self.current_block)
+                # --- Step 2: Process the entire batch of data ---
+                self.logger.info("Starting training on the fetched batch...")
                 self._process_training_batch(dataset)
+                self.logger.info("✅ Finished training on the batch.")
+
+                # --- Step 3: NOW, after training is done, append the block number ---
+                self.model.config.block_list.append(self.current_block)
+                self.logger.info(f"Appended block {self.current_block}. Block list size: {len(self.model.config.block_list)}")
+
+                # --- Step 4: And NOW, check if it's time to upload ---
+                if (
+                    len(self.model.config.block_list)
+                    >= self.config.neuron.target_n_blocks
+                ):
+                    self.logger.info("🎯 Target blocks reached. Starting background upload...")
+                    self.start_background_upload(
+                        epoch=self.local_progress.epoch,
+                    )
+                    # Clear the list after triggering an upload
+                    self.model.config.block_list = []
+
             except Exception as e:
-                self.logger.warning(f"Training Loop Failed with error: {e}")
+                self.logger.error(f"Training Loop Failed with error: {e}")
                 self.training_status = TrainingStatus.ERROR
                 self.training_error = str(e)
-                break
-
+                # A short sleep to prevent a fast error loop
+                time.sleep(30)
+        
         self.training_status = TrainingStatus.STOPPED
 
     def _process_training_batch(self, dataset):
-        """Process a single training batch"""
-
+        """Process a single training batch (this function is correct as is)"""
+        # The logic inside this function can remain the same
         for inputs, labels in dataset:
             if not self.training_active.is_set():
                 break
@@ -883,7 +883,7 @@ class Miner(BaseMinerNeuron):
                 >= self.local_batch_size_train_effective
             ):
                 self.logger.info(
-                    f":training:  Outer Step: {self.local_progress.epoch} | "
+                    f"🏋️  Outer Step: {self.local_progress.epoch} | "
                     f"Inner Step: {self.local_progress.inner_step} | "
                     f"Learning Rate: {self.inner_optimizer.param_groups[0]['lr']:.8f} | "
                     f"Average Loss: {self.local_progress.loss:.2f}"
