@@ -143,14 +143,14 @@ def add_args(cls, parser, prefix=None):
         nargs="+",
         help="The addresses for the DHT",
         default=[
-            "/ip4/161.97.156.125/tcp/8000/p2p/12D3KooWRXATj82cqk2zi7uZ2Q1soPuML8ietJXM6RdGnMHGB73U",
+            "/ip4/161.97.156.125/tcp/8000/p2p/12D3KooWBcqjBjr7jHMHtrKtDtduPxuv7KKankS7qXif253N8k4y",
         ],
     )
     parser.add_argument(
         "--neuron.blocks_per_allreduce",
         type=int,
         help="Amount of blocks between each all reduce",
-        default=1800,
+        default=500,
     )
 
     parser.add_argument(
@@ -179,7 +179,7 @@ def add_args(cls, parser, prefix=None):
         "--neuron.min_group_size",
         type=int,
         help="The minimum group size for an all reduce",
-        default=50,
+        default=32,
     )
 
     parser.add_argument(
@@ -207,7 +207,7 @@ def add_args(cls, parser, prefix=None):
         "--neuron.local_batch_size_train_effective",
         type=int,
         help="Amount of micro batches for gradient accumulation",
-        default=2048,
+        default=512,
     )
 
     parser.add_argument(
@@ -256,7 +256,7 @@ def add_args(cls, parser, prefix=None):
         "--neuron.influxdb_token",
         type=str,
         help="The influxdb token",
-        default="648b65eb0a5b1d7b48e71e695fd6bb6611936548debaf281cf438df8ce03b74b",
+        default="JCDOYKFbiC13zdgbTQROpyvB69oaUWvO4pRw_c3AEYhTjU998E_X_oIJJOVAW24nAE0WYxMwIgdFSLZg8aeV-g==",
     )
 
     parser.add_argument(
@@ -264,6 +264,48 @@ def add_args(cls, parser, prefix=None):
         type=str,
         help="The influxdb org",
         default="distributed-training",
+    )
+
+    parser.add_argument(
+        "--neuron.use_dct",
+        action="store_true",
+        help="If true uses DCT when compressing gradients",
+        default=False,
+    )
+
+    parser.add_argument(
+        "--neuron.momentum_decay",
+        type=float,
+        help="Amount of micro batches for gradient accumulation",
+        default=0.999,
+    )
+
+    parser.add_argument(
+        "--neuron.target_chunk",
+        type=int,
+        help="Amount of micro batches for gradient accumulation",
+        default=64,
+    )
+
+    parser.add_argument(
+        "--neuron.quantization_bins",
+        type=int,
+        help="Amount of micro batches for gradient accumulation",
+        default=256,
+    )
+
+    parser.add_argument(
+        "--neuron.quantization_range",
+        type=int,
+        help="Range",
+        default=6,
+    )
+
+    parser.add_argument(
+        "--neuron.topk_compression",
+        type=int,
+        help="Amount of micro batches for gradient accumulation",
+        default=32,
     )
 
     if neuron_type == "validator":
@@ -345,6 +387,27 @@ def add_args(cls, parser, prefix=None):
             type=int,
             help="The maximum number of TAO allowed to query a validator with a vpermit.",
             default=40960,
+        )
+
+        parser.add_argument(
+            "--neuron.openskill_beta",
+            type=int,
+            help="The value of the beta used in the openskill model.",
+            default=7,
+        )
+
+        parser.add_argument(
+            "--neuron.openskill_tau",
+            type=int,
+            help="The value of the tau used in the openskill model.",
+            default=0.1,
+        )
+
+        parser.add_argument(
+            "--neuron.assigned_loss_score_moving_average_alpha",
+            type=float,
+            help="The value of the alpha for the assinged loss score moving average.",
+            default=0.05,
         )
 
     else:
