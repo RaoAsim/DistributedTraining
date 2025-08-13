@@ -94,6 +94,8 @@ class Miner(BaseMinerNeuron):
         self._init_basic_components()
         self._init_model_components()
         self._init_network_components()
+        DatasetLoader.initialize_stream(seed=self.uid)
+
 
     def _update_wandb_project(self):
         suffix = "_miners" if self.neuron_type == "MinerNeuron" else "_validators"
