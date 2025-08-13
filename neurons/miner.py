@@ -72,7 +72,7 @@ from distributed_training.utils.misc import (
     init_dht,
     load_wandb,
 )
-from distributed_training.utils.logging import setup_logging
+from distributed_training.utils.logger import setup_logging
 from distributed_training.utils.progress_tracker import (
     GlobalTrainingProgress,
     LocalTrainingProgress,
@@ -94,8 +94,6 @@ class Miner(BaseMinerNeuron):
         self._init_basic_components()
         self._init_model_components()
         self._init_network_components()
-        DatasetLoader.initialize_stream(seed=self.uid)
-
 
     def _update_wandb_project(self):
         suffix = "_miners" if self.neuron_type == "MinerNeuron" else "_validators"
