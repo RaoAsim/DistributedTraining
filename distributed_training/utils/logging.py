@@ -106,9 +106,6 @@ def hive_log_filter(record):
     }
 
 
-# ------------------------------
-# Main Setup Function
-# ------------------------------
 def setup_logging(self, local_logfile="logs_mylogfile.txt", config=None):
     """
     Configure and start logging for the distributed training miner.
@@ -175,7 +172,7 @@ def setup_logging(self, local_logfile="logs_mylogfile.txt", config=None):
             "hotkey": self.wallet.hotkey.ss58_address,
             "netuid": str(self.config.netuid),
         },
-        auth=("944477", os.environ["LOKI_KEY"]),
+        auth=("944477", os.getenv("LOKI_KEY")),
         version="1",
     )
     loki_handler.setLevel(logging.DEBUG)
