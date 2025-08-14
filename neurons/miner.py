@@ -451,6 +451,7 @@ class Miner(BaseMinerNeuron):
             load_state_from_peer(self, epoch=self.global_progress.epoch)
             self.start_background_upload(
                 epoch=self.global_progress.epoch,
+                blocks_to_save= self.model.config.block_list
             )
         else:
             del global_model
@@ -576,7 +577,7 @@ class Miner(BaseMinerNeuron):
 
         return gradient, xshapes, totalks
 
-    def upload_model(self, epoch):
+    def upload_model(self, epoch,blocks_to_save: list=None):
         """Unified function to save and upload both model and optimizer state"""
         if not repo_exists(self.config.neuron.local_model_name, repo_type="model"):
             try:
@@ -604,7 +605,11 @@ class Miner(BaseMinerNeuron):
                 self.logger.info(
                     f":memory: Saving model state locally for epoch {epoch}"
                 )
+
                 self.model.config.inner_step = self.local_progress.inner_step
+                
+                if blocks_to_save is not None:
+                    self.model.config.block_list = blocks_to_save
                 self.model.save_pretrained(os.path.join(self.output_dir))
 
                 # Reset model blocklist & keep local copy in case upload fails
@@ -723,7 +728,7 @@ class Miner(BaseMinerNeuron):
 
         return False
 
-    def start_background_upload(self, epoch):
+    def start_background_upload(self, epoch, blocks_to_save: list=None):
         """Starts a background upload of the model state, managing ongoing uploads."""
         # If there's an ongoing upload, check if it's done
         if self.current_upload_future and not self.current_upload_future.done():
@@ -732,7 +737,7 @@ class Miner(BaseMinerNeuron):
 
         # Start new upload
         self.current_upload_future = self.upload_executor.submit(
-            self.upload_model, epoch
+            self.upload_model, epoch,blocks_to_save
         )
 
         # Optional: Add callback to handle completion
@@ -840,9 +845,11 @@ class Miner(BaseMinerNeuron):
                     len(self.model.config.block_list)
                     >= self.config.neuron.target_n_blocks
                 ):
+                    block_list_copy = list(self.model.config.block_list)
                     self.logger.info("🎯 Target blocks reached. Starting background upload...")
                     self.start_background_upload(
                         epoch=self.local_progress.epoch,
+                        blocks_to_save=block_list_copy,
                     )
                     # Clear the list after triggering an upload
                     self.model.config.block_list = []
@@ -990,6 +997,7 @@ class Miner(BaseMinerNeuron):
                 self.logger.info("AllReduce Operation Finished Succesfully")
                 self.start_background_upload(
                     epoch=self.local_progress.epoch,
+                    blocks_to_save=self.model.config.block_list
                 )
                 # Resume training when done
                 self.resume_training()
