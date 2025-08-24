@@ -787,6 +787,8 @@ class Miner(BaseMinerNeuron):
 
     def resume_training(self):
         """Resumes the continuous training loop"""
+        self.logger.info("Re-initializing dataset stream for new epoch...")
+        DatasetLoader.initialize_stream(seed=self.uid + self.local_progress.epoch)
         self.training_active.set()
         self.training_status = TrainingStatus.RUNNING
         self.logger.info(":white_heavy_check_mark: Resuming continuous training.")
