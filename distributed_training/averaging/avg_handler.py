@@ -415,6 +415,8 @@ class AveragingHandler:
                 )
 
                 # Validate weight updates
+                bt.logging.info("Re-initializing dataset stream for validation...")
+                DatasetLoader.initialize_stream(seed=self.uid + local_progress.epoch)
                 await self._validate_weight_update(initial_weights, block)
                 synapse.completion = True
             else:
