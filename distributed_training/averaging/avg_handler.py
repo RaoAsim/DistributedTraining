@@ -82,7 +82,7 @@ class AveragingHandler:
             num_samples_for_cycle= 5 * 100 
             # Use from_stream to get a small dataset with just one batch
             validation_dataset = DatasetLoader.from_stream(
-                batch_size=self.local_batch_size_train,
+                batch_size=4,
                 sequence_length=1024,
                 tokenizer=self.tokenizer,
                 num_samples=num_samples_for_cycle  # num_samples = batch_size for one batch
